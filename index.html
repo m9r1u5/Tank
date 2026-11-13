@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tank Levels</title>
+<meta name="description" content="Live tank levels from the plant PLC">
+<meta name="theme-color" content="#1f7fb8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tanks">
+<style>
+:root{
+  --bg:#f3f5f7; --card:#ffffff; --ink:#18212b; --muted:#5d6b78; --line:#d9e0e6;
+  --fill:#1f7fb8; --low:#c8372d; --high:#d98a00; --ok:#1e8a4c; --shell:#c9d3dc; --accent:#1f7fb8;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#11161b; --card:#1a2128; --ink:#e7edf2; --muted:#93a1ad; --line:#2b353f;
+         --fill:#2d93cf; --shell:#34414d; --accent:#4aa8e0; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+h1{font-size:19px;margin:0;font-weight:700}
+.pill{font-size:12px;padding:3px 10px;border-radius:999px;font-weight:600;color:#fff;background:var(--muted);white-space:nowrap}
+.pill.live{background:var(--ok)} .pill.stale{background:var(--high)} .pill.off{background:var(--low)} .pill.demo{background:#6b5bd6}
+.iconbtn{margin-left:auto;border:0;background:transparent;color:var(--ink);font-size:24px;line-height:1;padding:4px 8px;border-radius:8px;cursor:pointer}
+.iconbtn:active{background:var(--line)}
+.sub{width:100%;display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;color:var(--muted)}
+.sub b{color:var(--ink);font-size:18px;font-variant-numeric:tabular-nums}
+.sub span{white-space:nowrap}
+.banner{margin:12px 16px 0;padding:10px 12px;border-radius:10px;font-size:14px;background:#ece9ff;color:#3b2f9e;border:1px solid #cfc8ff}
+.banner.err{background:#fde8e6;color:#8e1f17;border-color:#f3c0bb}
+@media (prefers-color-scheme: dark){ .banner{background:#26214a;color:#d4ceff;border-color:#3d3570} .banner.err{background:#3e1b18;color:#ffc9c3;border-color:#5e2924} }
+main{padding:12px 16px calc(24px + env(safe-area-inset-bottom));max-width:1400px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:5px}
+.card h2{font-size:15px;margin:0;font-weight:600;display:flex;justify-content:space-between;gap:6px}
+.card h2 small{font-weight:400;color:var(--muted);font-size:12px}
+.tankbox{height:140px;display:flex;align-items:center;justify-content:center}
+.big{font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}
+.row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.row b{color:var(--ink);font-weight:600}
+.flag{font-size:12px;color:var(--high)} .flag.bad{color:var(--low)}
+.foot{margin-top:18px;text-align:center;font-size:12px;color:var(--muted)}
+/* menu + sheets */
+.menu{position:fixed;top:calc(52px + env(safe-area-inset-top));right:10px;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);display:none;min-width:210px;overflow:hidden}
+.menu.open{display:block}
+.menu button{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--ink);font-size:15px;padding:12px 16px;cursor:pointer}
+.menu button:active{background:var(--line)}
+.sheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
+.sheet.open{display:flex}
+.panel{background:var(--card);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
+@media (min-width:700px){ .sheet{align-items:center} .panel{border-radius:16px} }
+.panel h3{margin:0 0 10px;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+.panel h4{margin:18px 0 8px;font-size:15px}
+.panel p{font-size:14px;color:var(--muted);margin:6px 0}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:16px}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{border:0;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff}
+.btn.sec{background:var(--line);color:var(--ink)}
+.msg{font-size:13px;margin-top:8px;min-height:18px}
+.msg.bad{color:var(--low)} .msg.good{color:var(--ok)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:600}
+td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:600}
+@media (max-width:480px){ .grid{grid-template-columns:1fr 1fr;gap:10px} .big{font-size:18px} .tankbox{height:105px} .card{padding:10px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tank Levels</h1>
+  <span id="status" class="pill">Loading</span>
+  <button class="iconbtn" id="menuBtn" aria-label="Menu">&#8942;</button>
+  <div class="sub"><span id="updated">&nbsp;</span><span>Total <b id="total">-</b> <span id="totalpct"></span></span></div>
+</header>
+<div id="banner" class="banner" style="display:none"></div>
+<main>
+  <div id="grid" class="grid"></div>
+  <div class="foot" id="foot"></div>
+</main>
+
+<div class="menu" id="menu">
+  <button id="mRefresh">Refresh now</button>
+  <button id="mInstall">Install app</button>
+  <button id="mShare">Share app</button>
+  <button id="mUpdate">Check for updates</button>
+  <button id="mAdmin">Admin</button>
+</div>
+
+<!-- Admin login / setup -->
+<div class="sheet" id="loginSheet"><div class="panel">
+  <h3><span id="loginTitle">Admin</span><button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+  <div id="setupBox" style="display:none">
+    <p>Create an admin password. It unlocks the sensor signals and the connection settings on this phone.</p>
+    <label for="newPw1">New password</label><input id="newPw1" type="password" autocomplete="new-password">
+    <label for="newPw2">Repeat password</label><input id="newPw2" type="password" autocomplete="new-password">
+    <div class="btns"><button class="btn" id="setPwBtn">Save password</button></div>
+  </div>
+  <div id="loginBox" style="display:none">
+    <label for="pw">Admin password</label><input id="pw" type="password" autocomplete="current-password">
+    <div class="btns"><button class="btn" id="loginBtn">Unlock</button></div>
+  </div>
+  <div class="msg" id="loginMsg"></div>
+</div></div>
+
+<!-- Admin panel -->
+<div class="sheet" id="adminSheet"><div class="panel">
+  <h3>Admin <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+
+  <h4>Sensor signals (4-20 mA inputs)</h4>
+  <table><thead><tr><th>Input</th><th>mA</th><th>Status</th></tr></thead><tbody id="signals"></tbody></table>
+
+  <h4>Tanks and PLC channels</h4>
+  <table><thead><tr><th>Tank</th><th>PLC No</th><th>Level mm</th><th>Litres</th></tr></thead><tbody id="tankmap"></tbody></table>
+
+  <h4>Other PLC tank channels (not yet identified)</h4>
+  <table><thead><tr><th>PLC No</th><th>Level mm</th><th>Litres</th></tr></thead><tbody id="others"></tbody></table>
+
+  <h4>Data source</h4>
+  <p>The address this app reads the tank levels from. Leave empty to show demo data.</p>
+  <label for="srcUrl">Data address (URL)</label>
+  <input id="srcUrl" type="url" inputmode="url" placeholder="https://...">
+  <label for="refreshSec">Refresh every (seconds)</label>
+  <input id="refreshSec" type="number" min="5" max="600" inputmode="numeric">
+  <div class="btns"><button class="btn" id="saveSrc">Save</button><button class="btn sec" id="testSrc">Test</button></div>
+  <div class="msg" id="srcMsg"></div>
+
+  <h4>Admin password</h4>
+  <label for="chPw1">New password</label><input id="chPw1" type="password" autocomplete="new-password">
+  <label for="chPw2">Repeat password</label><input id="chPw2" type="password" autocomplete="new-password">
+  <div class="btns"><button class="btn sec" id="chPwBtn">Change password</button><button class="btn sec" id="lockBtn">Lock admin</button></div>
+  <div class="msg" id="pwMsg"></div>
+
+  <p id="verText" style="margin-top:18px"></p>
+</div></div>
+
+<!-- Install help (iPhone etc.) -->
+<div class="sheet" id="installSheet"><div class="panel">
+  <h3>Install Tank Levels <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+  <div id="installText"></div>
+</div></div>
+
+<script>
+var APP_VERSION = '1.0.0';
+var LS = {
+  get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
+  set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
+  del: function(k){ try { localStorage.removeItem('tank.' + k); } catch(e){} }
+};
+var $ = function(id){ return document.getElementById(id); };
+var fmt = function(n){ return (n === null || n === undefined || isNaN(n)) ? '-' : Math.round(n).toLocaleString('en-ZA'); };
+var esc = function(s){ return String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+
+/* Demo data: real PLC readings taken 13 Nov 2026, 06:50 */
+var DEMO = {"connected":true,"demo":true,"lastRead":null,"error":null,
+ "tanks":[
+  {"name":"Tank 1 - Base Oil","plcNo":1,"shape":"horizontal","diameterMm":2740,"heightMm":2740,"capacityL":41500,"levelMm":668,"litres":7715},
+  {"name":"BOT2","plcNo":2,"shape":"vertical","diameterMm":2320,"heightMm":10930,"capacityL":46200,"levelMm":494,"litres":2063},
+  {"name":"BOT3","plcNo":3,"shape":"vertical","diameterMm":1800,"heightMm":11060,"capacityL":28100,"levelMm":3749,"litres":9413},
+  {"name":"BOT4","plcNo":4,"shape":"vertical","diameterMm":1900,"heightMm":9720,"capacityL":27600,"levelMm":4904,"litres":13729},
+  {"name":"BOT5","plcNo":5,"shape":"vertical","diameterMm":2320,"heightMm":10930,"capacityL":46200,"levelMm":5164,"litres":21567},
+  {"name":"BOT6","plcNo":6,"shape":"vertical","diameterMm":1800,"heightMm":11060,"capacityL":28100,"levelMm":1864,"litres":4680},
+  {"name":"BOT7","plcNo":7,"shape":"vertical","diameterMm":1900,"heightMm":9720,"capacityL":27600,"levelMm":1701,"litres":4762},
+  {"name":"BOT8","plcNo":8,"shape":"horizontal","diameterMm":2948,"heightMm":2948,"capacityL":80000,"levelMm":1207,"litres":35624},
+  {"name":"BOT9","plcNo":9,"shape":"vertical","diameterMm":6000,"heightMm":11000,"capacityL":311000,"levelMm":0,"litres":0},
+  {"name":"BOT11","plcNo":11,"shape":"vertical","diameterMm":1827,"heightMm":5460,"capacityL":14300,"levelMm":2418,"litres":15801,"note":"PLC channel not yet confirmed"},
+  {"name":"BOT12","plcNo":12,"shape":"vertical","diameterMm":2320,"heightMm":10930,"capacityL":46200,"levelMm":3204,"litres":13381}],
+ "signals":[400,668,993,637,474,1159,0,1753,789,2000,1238,875,452,2000,1343,399,1190,0,2000,1037],
+ "others":[{"plcNo":13,"levelMm":186,"litres":113},{"plcNo":14,"levelMm":4717,"litres":32492},{"plcNo":15,"levelMm":2795,"litres":18514},
+  {"plcNo":16,"levelMm":4692,"litres":32310},{"plcNo":19,"levelMm":4500,"litres":4500},{"plcNo":20,"levelMm":4000,"litres":27241},{"plcNo":21,"levelMm":22,"litres":11}]};
+
+var current = null, timer = null;
+
+function tankSvg(t, levelFrac, volFrac){
+  var f = Math.max(0, Math.min(1, levelFrac || 0));
+  var col = volFrac < 0.10 ? 'var(--low)' : (volFrac > 0.90 ? 'var(--high)' : 'var(--fill)');
+  var id = 'c' + t.plcNo;
+  if (t.shape === 'horizontal'){
+    var W = 170, H = 90, r = 40, y = 5 + H * (1 - f);
+    return '<svg width="100%" height="100%" viewBox="0 0 180 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><defs><clipPath id="' + id + '"><rect x="5" y="5" width="' + W + '" height="' + H + '" rx="' + r + '"/></clipPath></defs>' +
+      '<rect x="5" y="5" width="' + W + '" height="' + H + '" rx="' + r + '" fill="var(--shell)"/>' +
+      '<rect x="0" y="' + y + '" width="190" height="' + (H * f + 6) + '" fill="' + col + '" clip-path="url(#' + id + ')"/>' +
+      '<rect x="5" y="5" width="' + W + '" height="' + H + '" rx="' + r + '" fill="none" stroke="var(--muted)" stroke-width="1.5"/></svg>';
+  }
+  var w = 70, h = 140, y2 = 5 + h * (1 - f);
+  return '<svg width="100%" height="100%" viewBox="0 0 80 150" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><defs><clipPath id="' + id + '"><rect x="5" y="5" width="' + w + '" height="' + h + '" rx="6"/></clipPath></defs>' +
+    '<rect x="5" y="5" width="' + w + '" height="' + h + '" rx="6" fill="var(--shell)"/>' +
+    '<rect x="0" y="' + y2 + '" width="80" height="' + (h * f + 6) + '" fill="' + col + '" clip-path="url(#' + id + ')"/>' +
+    '<rect x="5" y="5" width="' + w + '" height="' + h + '" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.5"/></svg>';
+}
+
+function ago(sec){
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return Math.round(sec / 60) + ' min ago';
+  if (sec < 172800) return Math.round(sec / 3600) + ' h ago';
+  return Math.round(sec / 86400) + ' days ago';
+}
+
+function render(d, fromCache){
+  current = d;
+  var st = $('status'), up = $('updated'), bn = $('banner');
+  var t = d.lastRead ? new Date(d.lastRead) : null;
+  var age = t ? (Date.now() - t.getTime()) / 1000 : 1e9;
+  var stale = Math.max(180, 3 * Number(LS.get('refresh', 30)));
+  if (d.demo){ st.className = 'pill demo'; st.textContent = 'Demo'; }
+  else if (!fromCache && d.connected !== false && age < stale){ st.className = 'pill live'; st.textContent = 'Live'; }
+  else if (t){ st.className = 'pill stale'; st.textContent = 'Not updating'; }
+  else { st.className = 'pill off'; st.textContent = 'No data'; }
+  up.textContent = d.demo ? 'Sample readings' : (t ? ('Updated ' + t.toLocaleTimeString('en-ZA', {hour:'2-digit', minute:'2-digit'}) + ' (' + ago(age) + ')') : '');
+
+  if (d.demo){ bn.className = 'banner'; bn.style.display = 'block'; bn.textContent = 'Showing sample readings. Live readings appear once the work PC is connected (Admin > Data source).'; }
+  else if (fromCache){ bn.className = 'banner err'; bn.style.display = 'block'; bn.textContent = 'Cannot reach the data source. Showing the last readings received.'; }
+  else if (d.error){ bn.className = 'banner err'; bn.style.display = 'block'; bn.textContent = 'Work PC reports a PLC problem: ' + d.error; }
+  else if (!d.demo && age >= stale && t){ bn.className = 'banner err'; bn.style.display = 'block'; bn.textContent = 'Readings are not updating. Is the work PC on and the tank monitor running?'; }
+  else { bn.style.display = 'none'; }
+
+  var html = '', tot = 0, cap = 0;
+  (d.tanks || []).forEach(function(tk){
+    var span = tk.shape === 'horizontal' ? tk.diameterMm : tk.heightMm;
+    var lf = span ? tk.levelMm / span : 0;
+    var vf = tk.capacityL ? tk.litres / tk.capacityL : 0;
+    if (typeof tk.litres === 'number') tot += tk.litres;
+    cap += tk.capacityL || 0;
+    var flag = '';
+    if (tk.levelMm === 0 && tk.litres === 0) flag = '<div class="flag bad">Reads zero: empty, or a sensor/cabling fault?</div>';
+    else if (vf > 1.02) flag = '<div class="flag">Above stated capacity: check tank data</div>';
+    if (tk.note) flag += '<div class="flag">' + esc(tk.note) + '</div>';
+    html += '<div class="card"><h2>' + esc(tk.name) + '</h2>' +
+      '<div class="tankbox">' + tankSvg(tk, lf, vf) + '</div>' +
+      '<div class="big">' + fmt(tk.litres) + ' L</div>' +
+      '<div class="row"><span>Full</span><b>' + (tk.capacityL ? Math.round(vf * 100) + ' %' : '-') + '</b></div>' +
+      '<div class="row"><span>Level</span><b>' + fmt(tk.levelMm) + ' mm</b></div>' +
+      '<div class="row"><span>Capacity</span><b>' + fmt(tk.capacityL) + ' L</b></div>' + flag + '</div>';
+  });
+  $('grid').innerHTML = html || '<p>No tanks in the data.</p>';
+  $('total').textContent = fmt(tot) + ' L';
+  $('totalpct').textContent = cap ? '(' + Math.round(tot / cap * 100) + ' %)' : '';
+  $('foot').textContent = 'Tank Levels v' + APP_VERSION;
+  renderAdmin();
+}
+
+function renderAdmin(){
+  if (!current) return;
+  var s = '';
+  (current.signals || []).forEach(function(v, i){
+    var mA = v / 100, cls = '', txt = 'OK';
+    if (v === null || v === undefined){ txt = '-'; mA = NaN; }
+    else if (v <= 0){ cls = 'bad'; txt = 'No signal'; }
+    else if (mA < 3.8){ cls = 'bad'; txt = 'Below 4 mA'; }
+    else if (mA >= 20){ cls = 'warn'; txt = 'At/above 20 mA'; }
+    s += '<tr><td>A' + (i + 1) + '</td><td>' + (isNaN(mA) ? '-' : mA.toFixed(2)) + '</td><td class="' + cls + '">' + txt + '</td></tr>';
+  });
+  $('signals').innerHTML = s || '<tr><td colspan="3">No signal data</td></tr>';
+  var m = '';
+  (current.tanks || []).forEach(function(t){ m += '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.plcNo) + '</td><td>' + fmt(t.levelMm) + '</td><td>' + fmt(t.litres) + '</td></tr>'; });
+  $('tankmap').innerHTML = m || '<tr><td colspan="4">None</td></tr>';
+  var o = '';
+  (current.others || []).forEach(function(r){ o += '<tr><td>' + esc(r.plcNo) + '</td><td>' + fmt(r.levelMm) + '</td><td>' + fmt(r.litres) + '</td></tr>'; });
+  $('others').innerHTML = o || '<tr><td colspan="3">None</td></tr>';
+}
+
+function load(){
+  var url = LS.get('src', '');
+  if (!url){ render(DEMO, false); return Promise.resolve(); }
+  return fetch(url, {cache: 'no-store'})
+    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(d){
+      if (!d || !d.tanks) throw new Error('No tank data at that address');
+      LS.set('last', JSON.stringify(d));
+      render(d, false);
+    })
+    .catch(function(){
+      var last = LS.get('last', '');
+      if (last){ try { render(JSON.parse(last), true); return; } catch(e){} }
+      render({tanks: [], signals: [], others: [], lastRead: null}, true);
+    });
+}
+
+function schedule(){
+  if (timer) clearInterval(timer);
+  var sec = Math.max(5, Number(LS.get('refresh', 30)) || 30);
+  timer = setInterval(function(){ if (!document.hidden) load(); }, sec * 1000);
+}
+document.addEventListener('visibilitychange', function(){ if (!document.hidden) load(); });
+
+/* ---------- menu ---------- */
+$('menuBtn').onclick = function(e){ e.stopPropagation(); $('menu').classList.toggle('open'); };
+document.addEventListener('click', function(){ $('menu').classList.remove('open'); });
+document.querySelectorAll('[data-close]').forEach(function(b){ b.onclick = function(){ b.closest('.sheet').classList.remove('open'); }; });
+document.querySelectorAll('.sheet').forEach(function(s){ s.addEventListener('click', function(e){ if (e.target === s) s.classList.remove('open'); }); });
+$('mRefresh').onclick = function(){ load(); };
+
+var deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferredPrompt = e; });
+$('mInstall').onclick = function(){
+  if (deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.then(function(){ deferredPrompt = null; }); return; }
+  var ua = navigator.userAgent, txt;
+  var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (standalone) txt = '<p>The app is already installed on this device.</p>';
+  else if (/iPhone|iPad|iPod/.test(ua)) txt = '<p><b>iPhone / iPad:</b> open this page in <b>Safari</b>, tap the <b>Share</b> button (square with arrow), then <b>Add to Home Screen</b>.</p>';
+  else if (/Android/.test(ua)) txt = '<p><b>Android:</b> open the browser menu (&#8942;) and tap <b>Install app</b> or <b>Add to Home screen</b>. Or install the APK from the GitHub page.</p>';
+  else txt = '<p><b>Computer:</b> in Edge or Chrome, click the install icon at the right of the address bar, or open the browser menu and choose <b>Install Tank Levels</b>.</p>';
+  $('installText').innerHTML = txt;
+  $('installSheet').classList.add('open');
+};
+$('mShare').onclick = function(){
+  var link = 'https://m9r1u5.github.io/Tank/';
+  if (navigator.share){ navigator.share({title: 'Tank Levels', text: 'Live tank levels', url: link}).catch(function(){}); }
+  else if (navigator.clipboard){ navigator.clipboard.writeText(link).then(function(){ alert('Link copied: ' + link); }); }
+  else { prompt('Copy this link:', link); }
+};
+$('mUpdate').onclick = function(){
+  if (!('serviceWorker' in navigator)){ location.reload(); return; }
+  navigator.serviceWorker.getRegistration().then(function(reg){
+    if (!reg){ location.reload(); return; }
+    reg.update().then(function(){
+      if (reg.waiting){ reg.waiting.postMessage('skip'); }
+      else if (reg.installing){ reg.installing.addEventListener('statechange', function(){ if (this.state === 'installed' && reg.waiting) reg.waiting.postMessage('skip'); }); }
+      else { alert('You have the latest version (v' + APP_VERSION + ').'); }
+    }).catch(function(){ alert('Could not check for updates. Are you online?'); });
+  });
+};
+
+/* ---------- admin (password stored only as a SHA-256 hash on this device) ---------- */
+var adminOpen = false;
+function sha(text){
+  var data = new TextEncoder().encode('tank-levels:' + text);
+  return crypto.subtle.digest('SHA-256', data).then(function(buf){
+    return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join('');
+  });
+}
+function openAdmin(){
+  $('srcUrl').value = LS.get('src', '');
+  $('refreshSec').value = LS.get('refresh', 30);
+  $('verText').textContent = 'App version ' + APP_VERSION;
+  $('srcMsg').textContent = ''; $('pwMsg').textContent = '';
+  renderAdmin();
+  $('adminSheet').classList.add('open');
+}
+$('mAdmin').onclick = function(){
+  if (adminOpen){ openAdmin(); return; }
+  var has = !!LS.get('pw', '');
+  $('setupBox').style.display = has ? 'none' : 'block';
+  $('loginBox').style.display = has ? 'block' : 'none';
+  $('loginTitle').textContent = has ? 'Admin' : 'Set up admin';
+  $('loginMsg').textContent = ''; $('pw').value = ''; $('newPw1').value = ''; $('newPw2').value = '';
+  $('loginSheet').classList.add('open');
+  setTimeout(function(){ (has ? $('pw') : $('newPw1')).focus(); }, 100);
+};
+$('setPwBtn').onclick = function(){
+  var a = $('newPw1').value, b = $('newPw2').value, m = $('loginMsg');
+  if (a.length < 4){ m.className = 'msg bad'; m.textContent = 'Use at least 4 characters.'; return; }
+  if (a !== b){ m.className = 'msg bad'; m.textContent = 'The two passwords do not match.'; return; }
+  sha(a).then(function(h){ LS.set('pw', h); adminOpen = true; $('loginSheet').classList.remove('open'); openAdmin(); });
+};
+function tryLogin(){
+  var m = $('loginMsg');
+  sha($('pw').value).then(function(h){
+    if (h === LS.get('pw', '')){ adminOpen = true; $('loginSheet').classList.remove('open'); openAdmin(); }
+    else { m.className = 'msg bad'; m.textContent = 'Wrong password.'; }
+  });
+}
+$('loginBtn').onclick = tryLogin;
+$('pw').addEventListener('keydown', function(e){ if (e.key === 'Enter') tryLogin(); });
+$('lockBtn').onclick = function(){ adminOpen = false; $('adminSheet').classList.remove('open'); };
+$('chPwBtn').onclick = function(){
+  var a = $('chPw1').value, b = $('chPw2').value, m = $('pwMsg');
+  if (a.length < 4){ m.className = 'msg bad'; m.textContent = 'Use at least 4 characters.'; return; }
+  if (a !== b){ m.className = 'msg bad'; m.textContent = 'The two passwords do not match.'; return; }
+  sha(a).then(function(h){ LS.set('pw', h); $('chPw1').value = ''; $('chPw2').value = ''; m.className = 'msg good'; m.textContent = 'Password changed.'; });
+};
+$('saveSrc').onclick = function(){
+  var u = $('srcUrl').value.trim(), r = Math.min(600, Math.max(5, Number($('refreshSec').value) || 30));
+  if (u) LS.set('src', u); else { LS.del('src'); LS.del('last'); }
+  LS.set('refresh', r);
+  $('srcMsg').className = 'msg good'; $('srcMsg').textContent = 'Saved.';
+  schedule(); load();
+};
+$('testSrc').onclick = function(){
+  var u = $('srcUrl').value.trim(), m = $('srcMsg');
+  if (!u){ m.className = 'msg bad'; m.textContent = 'Enter an address first.'; return; }
+  m.className = 'msg'; m.textContent = 'Testing...';
+  fetch(u, {cache: 'no-store'}).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(d){
+      if (!d || !d.tanks) throw new Error('reached, but it has no tank data');
+      m.className = 'msg good'; m.textContent = 'Works: ' + d.tanks.length + ' tanks' + (d.lastRead ? ', last reading ' + new Date(d.lastRead).toLocaleString('en-ZA') : '') + '.';
+    })
+    .catch(function(e){ m.className = 'msg bad'; m.textContent = 'Not working: ' + e.message; });
+};
+
+/* ---------- service worker ---------- */
+if ('serviceWorker' in navigator && location.protocol === 'https:'){
+  navigator.serviceWorker.register('sw.js').catch(function(){});
+  var reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function(){ if (!reloading){ reloading = true; location.reload(); } });
+}
+
+load(); schedule();
+</script>
+</body>
+</html>
