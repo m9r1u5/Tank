@@ -65,6 +65,17 @@ input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10
 .btn{border:0;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff}
 .btn.sec{background:var(--line);color:var(--ink)}
 .msg{font-size:13px;margin-top:8px;min-height:18px}
+.panel.wide{max-width:1100px}
+.dctl{display:flex;flex-wrap:wrap;gap:8px}
+.dctl label{margin:0;flex:1 1 130px}
+select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:16px}
+.dwrap{overflow-x:auto;margin-top:10px;border:1px solid var(--line);border-radius:10px}
+.dwrap table{font-size:12.5px}
+.dwrap th,.dwrap td{white-space:nowrap;padding:6px 8px}
+.dwrap tr.daystart td{border-top:2px solid var(--muted)}
+.dwrap td.tot,.dwrap th.tot{font-weight:700}
+.dwrap th.sticky,.dwrap td.sticky{position:sticky;left:0;background:var(--card)}
+.dwrap th:nth-child(2),.dwrap td:nth-child(2){text-align:left}
 .msg.bad{color:var(--low)} .msg.good{color:var(--ok)}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
@@ -88,6 +99,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </main>
 
 <div class="menu" id="menu">
+  <button id="mDaily">Daily readings</button>
   <button id="mRefresh">Refresh now</button>
   <button id="mInstall">Install app</button>
   <button id="mShare">Share app</button>
@@ -142,6 +154,20 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
   <p id="verText" style="margin-top:18px"></p>
 </div></div>
 
+<!-- Daily readings -->
+<div class="sheet" id="dailySheet"><div class="panel wide">
+  <h3>Daily readings <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+  <div class="dctl">
+    <label for="dFrom">From<input type="date" id="dFrom"></label>
+    <label for="dTo">To<input type="date" id="dTo"></label>
+    <label for="dView">Show<select id="dView"><option value="litres">Litres</option><option value="mm">Level (mm)</option><option value="pct">% full</option></select></label>
+    <label for="dSlot">Readings<select id="dSlot"><option value="all">All</option><option value="am">Morning</option><option value="pm">Afternoon</option></select></label>
+  </div>
+  <div class="btns"><button class="btn" id="dShare">Share for Excel (CSV)</button><button class="btn sec" id="dText">Share as message</button></div>
+  <div class="msg" id="dMsg"></div>
+  <div class="dwrap" id="dTable"></div>
+</div></div>
+
 <!-- Install help (iPhone etc.) -->
 <div class="sheet" id="installSheet"><div class="panel">
   <h3>Install Tank Levels <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
@@ -149,7 +175,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.0.0';
+var APP_VERSION = '1.1.0';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -394,6 +420,170 @@ $('testSrc').onclick = function(){
       m.className = 'msg good'; m.textContent = 'Works: ' + d.tanks.length + ' tanks' + (d.lastRead ? ', last reading ' + new Date(d.lastRead).toLocaleString('en-ZA') : '') + '.';
     })
     .catch(function(e){ m.className = 'msg bad'; m.textContent = 'Not working: ' + e.message; });
+};
+
+/* ---------- daily readings ---------- */
+var dRows = [];
+function dailyUrl(){
+  var u = LS.get('src', '');
+  if (!u) return '';
+  if (/\/api\/tanks/.test(u)) return u.replace(/\/api\/tanks.*$/, '/api/daily');
+  if (/\.json(\?.*)?$/.test(u)) return u.replace(/\.json(\?.*)?$/, '_daily.json');
+  return '';
+}
+function isoD(d){ return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function niceD(d){ var p = d.split('-'); return new Date(+p[0], p[1] - 1, +p[2]).toLocaleDateString('en-ZA', {weekday:'short', day:'2-digit', month:'short'}); }
+var SLOTORDER = {Morning: 1, Afternoon: 2, Manual: 3};
+function shortName(n){ return String(n).replace(/^Tank 1 - Base Oil$/, 'Tank 1'); }
+
+function dBuild(){
+  var from = $('dFrom').value, to = $('dTo').value, view = $('dView').value, sl = $('dSlot').value;
+  var sel = dRows.filter(function(r){
+    if (from && r.Date < from) return false;
+    if (to && r.Date > to) return false;
+    if (sl === 'am' && r.Slot !== 'Morning') return false;
+    if (sl === 'pm' && r.Slot !== 'Afternoon') return false;
+    return true;
+  });
+  var tanks = [], seen = {}, groups = {}, keys = [];
+  sel.forEach(function(r){
+    if (!seen[r.Tank]){ seen[r.Tank] = true; tanks.push(r.Tank); }
+    var k = r.Date + '|' + r.Slot + '|' + r.Time;
+    if (!groups[k]){ groups[k] = {date: r.Date, slot: r.Slot, time: r.Time, t: {}}; keys.push(k); }
+    groups[k].t[r.Tank] = r;
+  });
+  keys.sort(function(a, b){
+    var A = groups[a], B = groups[b];
+    if (A.date !== B.date) return A.date < B.date ? 1 : -1;
+    if (A.slot !== B.slot) return (SLOTORDER[A.slot] || 9) - (SLOTORDER[B.slot] || 9);
+    return A.time < B.time ? -1 : 1;
+  });
+  function val(r){
+    if (!r) return null;
+    if (view === 'litres') return Number(r.Litres);
+    if (view === 'mm') return Number(r.LevelMm);
+    return Number(r.CapacityL) ? Math.round(Number(r.Litres) / Number(r.CapacityL) * 1000) / 10 : null;
+  }
+  return {tanks: tanks, groups: groups, keys: keys, view: view, val: val};
+}
+
+function dRender(){
+  var b = dBuild(), unit = b.view === 'litres' ? 'L' : (b.view === 'mm' ? 'mm' : '%');
+  if (!b.keys.length){ $('dTable').innerHTML = '<p style="padding:14px">No readings in this period. Readings are taken at the work PC each morning and afternoon.</p>'; return; }
+  var h = '<table><thead><tr><th class="sticky">Date</th><th>Reading</th>';
+  b.tanks.forEach(function(t){ h += '<th>' + esc(shortName(t)) + '<br><small>' + unit + '</small></th>'; });
+  if (b.view === 'litres') h += '<th class="tot">Total<br><small>L</small></th>';
+  h += '</tr></thead><tbody>';
+  var last = '';
+  b.keys.forEach(function(k){
+    var g = b.groups[k], first = g.date !== last, tot = 0;
+    last = g.date;
+    h += '<tr' + (first ? ' class="daystart"' : '') + '><td class="sticky">' + (first ? niceD(g.date) : '') + '</td><td>' + esc(g.slot) + ' ' + esc(g.time) + '</td>';
+    b.tanks.forEach(function(t){
+      var v = b.val(g.t[t]);
+      if (b.view === 'litres' && v !== null) tot += v;
+      h += '<td>' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + '</td>';
+    });
+    if (b.view === 'litres') h += '<td class="tot">' + fmt(tot) + '</td>';
+    h += '</tr>';
+  });
+  $('dTable').innerHTML = h + '</tbody></table>';
+}
+
+function dLoad(){
+  var u = dailyUrl(), m = $('dMsg');
+  if (!u){ dRows = []; m.className = 'msg'; m.textContent = 'Set up the data source first (Admin > Data source).'; dRender(); return; }
+  m.className = 'msg'; m.textContent = 'Loading...';
+  fetch(u, {cache: 'no-store'}).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(d){
+      dRows = Array.isArray(d) ? d : (d ? Object.keys(d).map(function(k){ return d[k]; }) : []);
+      try { LS.set('dlast', JSON.stringify(dRows)); } catch(e){}
+      m.textContent = dRows.length ? '' : 'No daily readings uploaded yet. They appear after the next morning or afternoon reading.';
+      dRender();
+    })
+    .catch(function(){
+      try { dRows = JSON.parse(LS.get('dlast', '[]')) || []; } catch(e){ dRows = []; }
+      m.className = 'msg bad'; m.textContent = 'Could not load the latest readings' + (dRows.length ? '; showing the last ones received.' : '.');
+      dRender();
+    });
+}
+
+function dCsv(){
+  var b = dBuild(), u = b.view === 'litres' ? ' (L)' : (b.view === 'mm' ? ' (mm)' : ' (%)');
+  var head = ['Date', 'Reading', 'Time'].concat(b.tanks.map(function(t){ return t + u; }));
+  if (b.view === 'litres') head.push('Total (L)');
+  var lines = [head];
+  b.keys.forEach(function(k){
+    var g = b.groups[k], tot = 0, line = [g.date, g.slot, g.time];
+    b.tanks.forEach(function(t){ var v = b.val(g.t[t]); if (b.view === 'litres' && v !== null) tot += v; line.push(v === null ? '' : v); });
+    if (b.view === 'litres') line.push(tot);
+    lines.push(line);
+  });
+  return lines.map(function(l){ return l.map(function(c){ c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
+}
+
+function shareText(text, title){
+  var C = window.Capacitor;
+  if (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.Share){
+    return C.Plugins.Share.share({title: title, text: text, dialogTitle: title});
+  }
+  if (navigator.share) return navigator.share({title: title, text: text});
+  return Promise.reject(new Error('nosharing'));
+}
+
+$('mDaily').onclick = function(){
+  if (!$('dFrom').value){ var t = new Date(), f = new Date(); f.setDate(t.getDate() - 6); $('dFrom').value = isoD(f); $('dTo').value = isoD(t); }
+  $('dailySheet').classList.add('open');
+  dLoad();
+};
+['dFrom', 'dTo', 'dView', 'dSlot'].forEach(function(id){ $(id).addEventListener('change', dRender); });
+
+$('dShare').onclick = function(){
+  var m = $('dMsg'), csv = '﻿' + dCsv();
+  var name = 'Tank_readings_' + $('dFrom').value + '_to_' + $('dTo').value + '.csv';
+  var C = window.Capacitor;
+  if (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.Filesystem && C.Plugins.Share){
+    C.Plugins.Filesystem.writeFile({path: name, data: csv, directory: 'CACHE', encoding: 'utf8'})
+      .then(function(res){ return C.Plugins.Share.share({title: 'Tank readings', files: [res.uri], dialogTitle: 'Share tank readings'}); })
+      .then(function(){ m.className = 'msg good'; m.textContent = 'Shared.'; })
+      .catch(function(e){ if (e && /cancel/i.test(String(e.message || e))) return; m.className = 'msg bad'; m.textContent = 'Could not share the file: ' + (e.message || e); });
+    return;
+  }
+  var file = null;
+  try { file = new File([csv], name, {type: 'text/csv'}); } catch(e){}
+  if (file && navigator.canShare && navigator.canShare({files: [file]})){
+    navigator.share({files: [file], title: 'Tank readings'}).catch(function(){});
+    return;
+  }
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  m.className = 'msg good'; m.textContent = 'Saved to Downloads. It opens in Excel or Google Sheets.';
+};
+
+$('dText').onclick = function(){
+  var b = dBuild(), m = $('dMsg');
+  if (!b.keys.length){ m.className = 'msg bad'; m.textContent = 'Nothing to share for this period.'; return; }
+  var unit = b.view === 'litres' ? ' L' : (b.view === 'mm' ? ' mm' : ' %');
+  var out = ['Tank readings'];
+  b.keys.forEach(function(k){
+    var g = b.groups[k], tot = 0;
+    out.push('');
+    out.push(niceD(g.date) + ', ' + g.slot + ' ' + g.time);
+    b.tanks.forEach(function(t){
+      var v = b.val(g.t[t]);
+      if (b.view === 'litres' && v !== null) tot += v;
+      out.push(shortName(t) + ': ' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + unit);
+    });
+    if (b.view === 'litres') out.push('Total: ' + fmt(tot) + ' L');
+  });
+  shareText(out.join('\n'), 'Tank readings').catch(function(){
+    var ta = document.createElement('textarea'); ta.value = out.join('\n'); document.body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch(e){}
+    ta.remove();
+    m.className = ok ? 'msg good' : 'msg bad';
+    m.textContent = ok ? 'Copied. Paste it into WhatsApp or an e-mail.' : 'Sharing is not available on this device.';
+  });
 };
 
 /* ---------- service worker ---------- */
