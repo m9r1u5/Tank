@@ -185,7 +185,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
     <label for="dView">Show<select id="dView"><option value="litres">Litres</option><option value="mm">Level (mm)</option><option value="pct">% full</option></select></label>
     <label for="dSlot">Readings<select id="dSlot"><option value="all">All</option><option value="am">Morning</option><option value="pm">Afternoon</option></select></label>
   </div>
-  <div class="btns"><button class="btn" id="dExport">Export to Excel (CSV)</button><button class="btn sec" id="dPrint">Print</button><button class="btn sec" id="dShare">Share for Excel (CSV)</button><button class="btn sec" id="dText">Share as message</button></div>
+  <div class="btns"><button class="btn" id="dExport">Export to Excel (CSV)</button><button class="btn sec" id="dPrint">Print / PDF</button><button class="btn sec" id="dShare">Share for Excel (CSV)</button><button class="btn sec" id="dText">Share as message</button></div>
   <div class="msg" id="dMsg"></div>
   <div class="printhead"><b id="phTitle">Daily tank readings</b><span id="phInfo"></span></div>
   <div class="dwrap" id="dTable"></div>
@@ -198,7 +198,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.2.0';
+var APP_VERSION = '1.2.1';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -366,7 +366,24 @@ $('mShare').onclick = function(){
   else if (navigator.clipboard){ navigator.clipboard.writeText(link).then(function(){ alert('Link copied: ' + link); }); }
   else { prompt('Copy this link:', link); }
 };
+var APK_URL = 'https://github.com/m9r1u5/Tank/releases/latest/download/TankLevels.apk';
+function verNum(v){ return String(v).split('.').map(function(x){ return ('000' + x).slice(-4); }).join('.'); }
+function nativeUpdate(quiet){
+  return fetch('https://m9r1u5.github.io/Tank/index.html?t=' + Date.now(), {cache: 'no-store'})
+    .then(function(r){ return r.text(); })
+    .then(function(t){
+      var mm = t.match(/APP_VERSION = '([0-9.]+)'/), latest = mm ? mm[1] : null;
+      if (latest && verNum(latest) > verNum(APP_VERSION)){
+        if (quiet && LS.get('updAsked', '') === latest) return;
+        LS.set('updAsked', latest);
+        if (confirm('Tank Levels v' + latest + ' is available (you have v' + APP_VERSION + ').\n\nDownload it now? When the download finishes, open it and tap Update. Your settings are kept.')) location.href = APK_URL;
+      } else if (!quiet){ alert('You have the latest version (v' + APP_VERSION + ').'); }
+    })
+    .catch(function(){ if (!quiet) alert('Could not check for updates. Are you online?'); });
+}
+if (isNative()) setTimeout(function(){ nativeUpdate(true); }, 4000);
 $('mUpdate').onclick = function(){
+  if (isNative()){ nativeUpdate(false); return; }
   if (!('serviceWorker' in navigator)){ location.reload(); return; }
   navigator.serviceWorker.getRegistration().then(function(reg){
     if (!reg){ location.reload(); return; }
@@ -602,9 +619,106 @@ $('dExport').onclick = function(){
   dDownload(csv, name);
   m.className = 'msg good'; m.textContent = 'Saved to your Downloads folder as ' + name + '. It opens in Excel.';
 };
+
+/* ---------- small built-in PDF writer (no internet or add-ons needed) ---------- */
+var HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+function pdfClean(t){ return String(t).replace(/[   ]/g, ' ').replace(/[^\x20-\x7e]/g, '?'); }
+function pdfW(t, size, bold){ t = pdfClean(t); var w = 0; for (var i = 0; i < t.length; i++){ w += HW[t.charCodeAt(i) - 32] || 556; } return w * size / 1000 * (bold ? 1.06 : 1); }
+function pdfEsc(t){ return pdfClean(t).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
+function makePdf(title, info, head, units, rows){
+  var PW = 842, PH = 595, M = 28, avail = PW - 2 * M, n = head.length, size = 8.5, gap = 8, cw = [];
+  for (;;){
+    cw = [];
+    for (var c = 0; c < n; c++){
+      var w = Math.max(pdfW(head[c], size, true), pdfW(units[c] || '', size, false));
+      rows.forEach(function(r){ w = Math.max(w, pdfW(r.cells[c], size, c === n - 1 && r.boldLast)); });
+      cw.push(w + gap);
+    }
+    var tot = cw.reduce(function(a, b){ return a + b; }, 0);
+    if (tot <= avail || size <= 5.5) break;
+    size -= 0.25;
+  }
+  var extra = (avail - cw.reduce(function(a, b){ return a + b; }, 0)) / n;
+  if (extra > 0) cw = cw.map(function(w){ return w + extra; });
+  var lh = size * 1.75, pages = [], cur = null, y = 0;
+  function txt(x, yy, t, bold, sz){ return 'BT /' + (bold ? 'F2' : 'F1') + ' ' + sz.toFixed(2) + ' Tf ' + x.toFixed(2) + ' ' + yy.toFixed(2) + ' Td (' + pdfEsc(t) + ') Tj ET\n'; }
+  function line(x1, y1, x2, y2, w, g){ return g + ' G ' + w + ' w ' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' m ' + x2.toFixed(2) + ' ' + y2.toFixed(2) + ' l S\n'; }
+  function cell(c, t, yy, bold){
+    var x = M; for (var i = 0; i < c; i++) x += cw[i];
+    if (c < 2) return txt(x + 2, yy, t, bold, size);
+    return txt(x + cw[c] - 3 - pdfW(t, size, bold), yy, t, bold, size);
+  }
+  function newPage(){
+    cur = '';
+    cur += txt(M, PH - M - 12, title, true, 14);
+    cur += txt(PW - M - pdfW(info, 8, false), PH - M - 12, info, false, 8);
+    cur += line(M, PH - M - 18, PW - M, PH - M - 18, 1.2, '0');
+    y = PH - M - 34;
+    for (var c = 0; c < n; c++){ cur += cell(c, head[c], y, true); if (units[c]) cur += cell(c, units[c], y - size - 1, false); }
+    y -= size + 6;
+    cur += line(M, y, PW - M, y, 0.8, '0');
+    y -= lh;
+    pages.push(cur);
+  }
+  newPage();
+  rows.forEach(function(r){
+    if (y < M + 14){ pages[pages.length - 1] = cur; newPage(); }
+    if (r.daystart) cur += line(M, y + lh - size * 0.45, PW - M, y + lh - size * 0.45, 0.6, '0.45');
+    for (var c = 0; c < n; c++) cur += cell(c, r.cells[c], y, c === n - 1 && r.boldLast);
+    y -= lh;
+  });
+  pages[pages.length - 1] = cur;
+  pages = pages.map(function(p, i){ return p + txt(PW - M - 40, M - 12, 'Page ' + (i + 1) + ' of ' + pages.length, false, 7); });
+  var objs = [], np = pages.length;
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  var kids = []; for (var i = 0; i < np; i++) kids.push((5 + i * 2) + ' 0 R');
+  objs[2] = '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + np + ' >>';
+  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+  for (i = 0; i < np; i++){
+    objs[5 + i * 2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' + (6 + i * 2) + ' 0 R >>';
+    objs[6 + i * 2] = '<< /Length ' + pages[i].length + ' >>\nstream\n' + pages[i] + 'endstream';
+  }
+  var out = '%PDF-1.4\n', off = [];
+  for (i = 1; i < objs.length; i++){ off[i] = out.length; out += i + ' 0 obj\n' + objs[i] + '\nendobj\n'; }
+  var xref = out.length;
+  out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+  for (i = 1; i < objs.length; i++) out += ('0000000000' + off[i]).slice(-10) + ' 00000 n \n';
+  out += 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+  return out;
+}
+function dPdf(){
+  var b = dBuild(), unit = b.view === 'litres' ? 'L' : (b.view === 'mm' ? 'mm' : '%');
+  var head = ['Date', 'Reading'].concat(b.tanks.map(shortName)), units = ['', ''].concat(b.tanks.map(function(){ return unit; }));
+  if (b.view === 'litres'){ head.push('Total'); units.push('L'); }
+  var rows = [], last = '';
+  b.keys.forEach(function(k){
+    var g = b.groups[k], tot = 0, first = g.date !== last; last = g.date;
+    var cells = [first ? niceD(g.date) : '', g.slot + ' ' + g.time];
+    b.tanks.forEach(function(t){ var v = b.val(g.t[t]); if (b.view === 'litres' && v !== null) tot += v; cells.push(v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))); });
+    if (b.view === 'litres') cells.push(fmt(tot));
+    rows.push({cells: cells, daystart: first && rows.length > 0, boldLast: b.view === 'litres'});
+  });
+  var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[b.view];
+  return makePdf('Daily tank readings (' + vn + ')', 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '    Printed: ' + new Date().toLocaleString('en-ZA'), head, units, rows);
+}
+function isNative(){ var C = window.Capacitor; return !!(C && C.isNativePlatform && C.isNativePlatform()); }
+
 $('dPrint').onclick = function(){
   var m = $('dMsg');
   if (!dBuild().keys.length){ m.className = 'msg bad'; m.textContent = 'Nothing to print for this period.'; return; }
+  if (isNative()){
+    var C = window.Capacitor, pdf = dPdf(), name = dName().replace(/\.csv$/, '.pdf'), b64 = btoa(pdf);
+    var save = C.Plugins.Filesystem.writeFile({path: name, data: b64, directory: 'DOCUMENTS'}).then(function(){ return true; }, function(){ return false; });
+    save.then(function(saved){
+      return C.Plugins.Filesystem.writeFile({path: name, data: b64, directory: 'CACHE'}).then(function(res){
+        m.className = 'msg good';
+        m.textContent = (saved ? 'PDF saved in Documents as ' + name + '. ' : '') + 'Choose Drive, Files or a PDF app to print or keep it.';
+        return C.Plugins.Share.share({title: 'Tank readings (PDF)', files: [res.uri], dialogTitle: 'Print or save the PDF'});
+      });
+    }).catch(function(e){ if (e && /cancel/i.test(String(e.message || e))) return; m.className = 'msg bad'; m.textContent = 'Could not make the PDF: ' + (e.message || e); });
+    return;
+  }
   var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[$('dView').value];
   $('phTitle').textContent = 'Daily tank readings (' + vn + ')';
   $('phInfo').textContent = 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');

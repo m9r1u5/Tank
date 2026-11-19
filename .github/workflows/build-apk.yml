@@ -44,6 +44,14 @@ jobs:
           done
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
+      - name: Fixed signing key and version (so updates install over the old app)
+        run: |
+          mkdir -p ~/.android
+          cp .github/android/debug.keystore ~/.android/debug.keystore
+          VN=$(grep -o "APP_VERSION = '[0-9.]*'" index.html | grep -o "[0-9.]*[0-9]")
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"$VN\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
       - name: Build debug APK
         run: |
           cd android
