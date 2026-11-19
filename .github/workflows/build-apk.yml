@@ -35,6 +35,31 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Allow pinch to zoom
+        run: |
+          F=android/app/src/main/java/com/m9r1u5/tanklevels/MainActivity.java
+          cat > "$F" <<'JAVA'
+          package com.m9r1u5.tanklevels;
+
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  WebSettings s = getBridge().getWebView().getSettings();
+                  s.setSupportZoom(true);
+                  s.setBuiltInZoomControls(true);
+                  s.setDisplayZoomControls(false);
+                  s.setUseWideViewPort(true);
+              }
+          }
+          JAVA
+          sed -i 's/^          //' "$F"
+          cat "$F"
+
       - name: App icon
         run: |
           for d in android/app/src/main/res/mipmap-*; do

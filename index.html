@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.5, maximum-scale=5, user-scalable=yes, viewport-fit=cover">
 <title>Tank Levels</title>
 <meta name="description" content="Live tank levels from the plant PLC">
 <meta name="theme-color" content="#1f7fb8">
@@ -198,7 +198,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.2.1';
+var APP_VERSION = '1.2.2';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
