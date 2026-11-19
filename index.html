@@ -66,6 +66,28 @@ input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10
 .btn.sec{background:var(--line);color:var(--ink)}
 .msg{font-size:13px;margin-top:8px;min-height:18px}
 .panel.wide{max-width:1100px}
+#dailySheet{align-items:stretch;justify-content:stretch}
+#dailySheet .panel{max-width:none;width:100%;height:100%;max-height:none;border-radius:0;display:flex;flex-direction:column;
+  padding:calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom))}
+#dailySheet .dwrap{flex:1 1 auto;overflow:auto;min-height:0}
+#dailySheet .dwrap thead th{position:sticky;top:0;background:var(--card);z-index:1}
+#dailySheet .dwrap table{width:100%}
+#dailySheet .dwrap th,#dailySheet .dwrap td{padding:6px 6px}
+.printhead{display:none}
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  body.printing > *:not(#dailySheet){display:none !important}
+  body.printing #dailySheet{position:static;background:#fff;display:block}
+  body.printing #dailySheet .panel{display:block;height:auto;padding:0;color:#000;background:#fff}
+  body.printing #dailySheet h3,body.printing .dctl,body.printing #dailySheet .btns,body.printing #dMsg{display:none}
+  body.printing .printhead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:6px;font-size:10px}
+  body.printing .printhead b{font-size:15px}
+  body.printing #dailySheet .dwrap{overflow:visible;border:0}
+  body.printing #dailySheet .dwrap table{font-size:9px;color:#000}
+  body.printing #dailySheet .dwrap th,body.printing #dailySheet .dwrap td{padding:2px 4px;color:#000}
+  body.printing #dailySheet .dwrap thead th{position:static;background:#eee}
+  body.printing tr{break-inside:avoid}
+}
 .dctl{display:flex;flex-wrap:wrap;gap:8px}
 .dctl label{margin:0;flex:1 1 130px}
 select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:16px}
@@ -163,8 +185,9 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
     <label for="dView">Show<select id="dView"><option value="litres">Litres</option><option value="mm">Level (mm)</option><option value="pct">% full</option></select></label>
     <label for="dSlot">Readings<select id="dSlot"><option value="all">All</option><option value="am">Morning</option><option value="pm">Afternoon</option></select></label>
   </div>
-  <div class="btns"><button class="btn" id="dShare">Share for Excel (CSV)</button><button class="btn sec" id="dText">Share as message</button></div>
+  <div class="btns"><button class="btn" id="dExport">Export to Excel (CSV)</button><button class="btn sec" id="dPrint">Print</button><button class="btn sec" id="dShare">Share for Excel (CSV)</button><button class="btn sec" id="dText">Share as message</button></div>
   <div class="msg" id="dMsg"></div>
+  <div class="printhead"><b id="phTitle">Daily tank readings</b><span id="phInfo"></span></div>
   <div class="dwrap" id="dTable"></div>
 </div></div>
 
@@ -175,7 +198,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.1.0';
+var APP_VERSION = '1.2.0';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -555,10 +578,38 @@ $('dShare').onclick = function(){
     navigator.share({files: [file], title: 'Tank readings'}).catch(function(){});
     return;
   }
+  dDownload(csv, name);
+  m.className = 'msg good'; m.textContent = 'Saved to Downloads. It opens in Excel or Google Sheets.';
+};
+
+function dName(){ return 'Tank_readings_' + $('dFrom').value + '_to_' + $('dTo').value + '.csv'; }
+function dDownload(csv, name){
   var a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
   a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  m.className = 'msg good'; m.textContent = 'Saved to Downloads. It opens in Excel or Google Sheets.';
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+}
+$('dExport').onclick = function(){
+  var m = $('dMsg');
+  if (!dBuild().keys.length){ m.className = 'msg bad'; m.textContent = 'Nothing to export for this period.'; return; }
+  var csv = '\uFEFF' + dCsv(), name = dName(), C = window.Capacitor;
+  if (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.Filesystem){
+    C.Plugins.Filesystem.writeFile({path: name, data: csv, directory: 'DOCUMENTS', encoding: 'utf8'})
+      .then(function(){ m.className = 'msg good'; m.textContent = 'Saved in your phone\'s Documents folder as ' + name + '.'; })
+      .catch(function(){ m.className = 'msg bad'; m.textContent = 'This phone does not allow saving here. Use "Share for Excel" and choose Save to device or Drive.'; });
+    return;
+  }
+  dDownload(csv, name);
+  m.className = 'msg good'; m.textContent = 'Saved to your Downloads folder as ' + name + '. It opens in Excel.';
+};
+$('dPrint').onclick = function(){
+  var m = $('dMsg');
+  if (!dBuild().keys.length){ m.className = 'msg bad'; m.textContent = 'Nothing to print for this period.'; return; }
+  var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[$('dView').value];
+  $('phTitle').textContent = 'Daily tank readings (' + vn + ')';
+  $('phInfo').textContent = 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
+  document.body.classList.add('printing');
+  setTimeout(function(){ window.print(); document.body.classList.remove('printing'); }, 50);
 };
 
 $('dText').onclick = function(){
