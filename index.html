@@ -162,8 +162,13 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
   <p>The address this app reads the tank levels from. Leave empty to show demo data.</p>
   <label for="srcUrl">Data address (URL)</label>
   <input id="srcUrl" type="url" inputmode="url" placeholder="https://...">
-  <label for="refreshSec">Refresh every (seconds)</label>
-  <input id="refreshSec" type="number" min="5" max="600" inputmode="numeric">
+  <label for="refreshSec">Refresh every</label>
+  <select id="refreshSec">
+    <option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option>
+    <option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option>
+    <option value="1800">30 minutes</option><option value="3600">1 hour</option>
+  </select>
+  <p>The app always refreshes straight away when you open it, and with ⋮ &gt; Refresh now.</p>
   <div class="btns"><button class="btn" id="saveSrc">Save</button><button class="btn sec" id="testSrc">Test</button></div>
   <div class="msg" id="srcMsg"></div>
 
@@ -198,7 +203,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.2.2';
+var APP_VERSION = '1.2.3';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -258,7 +263,7 @@ function render(d, fromCache){
   var st = $('status'), up = $('updated'), bn = $('banner');
   var t = d.lastRead ? new Date(d.lastRead) : null;
   var age = t ? (Date.now() - t.getTime()) / 1000 : 1e9;
-  var stale = Math.max(180, 3 * Number(LS.get('refresh', 30)));
+  var stale = 180;
   if (d.demo){ st.className = 'pill demo'; st.textContent = 'Demo'; }
   else if (!fromCache && d.connected !== false && age < stale){ st.className = 'pill live'; st.textContent = 'Live'; }
   else if (t){ st.className = 'pill stale'; st.textContent = 'Not updating'; }
@@ -405,7 +410,9 @@ function sha(text){
 }
 function openAdmin(){
   $('srcUrl').value = LS.get('src', '');
-  $('refreshSec').value = LS.get('refresh', 30);
+  var rv = String(LS.get('refresh', 30)), rs = $('refreshSec');
+  if (![].some.call(rs.options, function(o){ return o.value === rv; })){ var o = document.createElement('option'); o.value = rv; o.textContent = rv + ' seconds'; rs.insertBefore(o, rs.firstChild); }
+  rs.value = rv;
   $('verText').textContent = 'App version ' + APP_VERSION;
   $('srcMsg').textContent = ''; $('pwMsg').textContent = '';
   renderAdmin();
@@ -444,7 +451,7 @@ $('chPwBtn').onclick = function(){
   sha(a).then(function(h){ LS.set('pw', h); $('chPw1').value = ''; $('chPw2').value = ''; m.className = 'msg good'; m.textContent = 'Password changed.'; });
 };
 $('saveSrc').onclick = function(){
-  var u = $('srcUrl').value.trim(), r = Math.min(600, Math.max(5, Number($('refreshSec').value) || 30));
+  var u = $('srcUrl').value.trim(), r = Math.min(3600, Math.max(5, Number($('refreshSec').value) || 30));
   if (u) LS.set('src', u); else { LS.del('src'); LS.del('last'); }
   LS.set('refresh', r);
   $('srcMsg').className = 'msg good'; $('srcMsg').textContent = 'Saved.';
