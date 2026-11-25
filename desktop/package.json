@@ -1,0 +1,30 @@
+{
+  "name": "tank-levels-desktop",
+  "productName": "Tank Levels",
+  "version": "1.0.0",
+  "description": "Tank Levels - live tank levels and daily readings",
+  "author": "MG Electrical and Maintenance",
+  "main": "main.js",
+  "private": true,
+  "scripts": { "dist": "electron-builder --win nsis --x64 --publish never" },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.m9r1u5.tanklevels.desktop",
+    "productName": "Tank Levels",
+    "copyright": "MG Electrical and Maintenance",
+    "files": ["main.js", "offline.html", "icon.png"],
+    "directories": { "output": "dist" },
+    "win": { "target": "nsis", "icon": "icon.png" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tank Levels",
+      "artifactName": "TankLevels-Setup.exe"
+    }
+  }
+}

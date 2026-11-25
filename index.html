@@ -105,6 +105,7 @@ th:first-child,td:first-child{text-align:left}
 th{color:var(--muted);font-weight:600}
 td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:600}
 @media (max-width:480px){ .grid{grid-template-columns:1fr 1fr;gap:10px} .big{font-size:18px} .tankbox{height:105px} .card{padding:10px} }
+html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </style>
 </head>
 <body>
@@ -203,7 +204,7 @@ td.bad{color:var(--low);font-weight:600} td.warn{color:var(--high);font-weight:6
 </div></div>
 
 <script>
-var APP_VERSION = '1.2.3';
+var APP_VERSION = '1.2.4';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -709,6 +710,7 @@ function dPdf(){
   var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[b.view];
   return makePdf('Daily tank readings (' + vn + ')', 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '    Printed: ' + new Date().toLocaleString('en-ZA'), head, units, rows);
 }
+if (/TankLevelsDesktop/.test(navigator.userAgent)){ document.documentElement.classList.add('desktop'); }
 function isNative(){ var C = window.Capacitor; return !!(C && C.isNativePlatform && C.isNativePlatform()); }
 
 $('dPrint').onclick = function(){

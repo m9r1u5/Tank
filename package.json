@@ -1,6 +1,6 @@
 {
   "name": "tank-levels",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "description": "Live tank levels from the plant PLC",
   "devDependencies": {
