@@ -6,6 +6,9 @@ on:
     paths: ['desktop/**', '.github/workflows/build-exe.yml']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   exe:
     runs-on: windows-latest
@@ -23,3 +26,10 @@ jobs:
         with:
           name: TankLevels-Setup
           path: desktop/dist/TankLevels-Setup.exe
+      - name: Publish (separate from the phone app release)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete windows -y --cleanup-tag || true
+          gh release create windows desktop/dist/TankLevels-Setup.exe --title "Tank Levels for Windows" --notes "Windows installer for Tank Levels." --latest=false
