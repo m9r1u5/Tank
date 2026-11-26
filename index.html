@@ -214,7 +214,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.3.1';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -310,6 +310,7 @@ function render(d, fromCache){
   $('totalpct').textContent = cap ? '(' + Math.round(tot / cap * 100) + ' %)' : '';
   $('foot').textContent = 'Tank Levels v' + APP_VERSION;
   renderAdmin();
+  if ($('dailySheet').classList.contains('open') && dRows.length) dRender();
 }
 
 function renderAdmin(){
@@ -554,8 +555,8 @@ function dBuild(){
     return true;
   });
   // Group each tank by its PLC number, so a renamed tank stays in one column.
-  var tanks = [], seen = {}, groups = {}, keys = [], label = {}, newest = {}, order = {}, byName = {};
-  (current && current.tanks || []).forEach(function(t, i){ order['p' + t.plcNo] = i; byName[t.name] = t.plcNo; });
+  var tanks = [], seen = {}, groups = {}, keys = [], label = {}, newest = {}, order = {}, byName = {}, live = {};
+  (current && !current.demo && current.tanks || []).forEach(function(t, i){ order['p' + t.plcNo] = i; byName[t.name] = t.plcNo; live['p' + t.plcNo] = t; });
   function keyOf(r){ return r.PlcNo ? 'p' + r.PlcNo : (byName[r.Tank] !== undefined ? 'p' + byName[r.Tank] : 'n' + r.Tank); }
   sel.forEach(function(r){
     var tk = keyOf(r);
@@ -570,7 +571,11 @@ function dBuild(){
     var A = order[a] !== undefined ? order[a] : 999, B = order[b] !== undefined ? order[b] : 999;
     return A - B;
   });
-  tanks.forEach(function(tk){ label[tk] = newest[tk].name; });
+  // Headings use today's tank number and product from the live data, so changes show at once.
+  tanks.forEach(function(tk){
+    label[tk] = live[tk] ? live[tk].name : newest[tk].name;
+    if (live[tk]) newest[tk].prod = live[tk].product || '';
+  });
   keys.sort(function(a, b){
     var A = groups[a], B = groups[b];
     if (A.date !== B.date) return A.date < B.date ? 1 : -1;
@@ -583,7 +588,7 @@ function dBuild(){
     if (view === 'mm') return Number(r.LevelMm);
     return Number(r.CapacityL) ? Math.round(Number(r.Litres) / Number(r.CapacityL) * 1000) / 10 : null;
   }
-  var anyProd = sel.some(function(r){ return r.Product; });
+  var anyProd = sel.some(function(r){ return r.Product; }) || tanks.some(function(tk){ return newest[tk].prod; });
   return {tanks: tanks, groups: groups, keys: keys, view: view, val: val,
     label: function(tk){ return label[tk]; },
     prod: function(tk){ return newest[tk] ? newest[tk].prod : ''; },
