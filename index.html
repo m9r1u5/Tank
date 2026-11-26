@@ -40,6 +40,11 @@ main{padding:12px 16px calc(24px + env(safe-area-inset-bottom));max-width:1400px
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:5px}
 .card h2{font-size:15px;margin:0;font-weight:600;display:flex;justify-content:space-between;gap:6px}
 .card h2 small{font-weight:400;color:var(--muted);font-size:12px}
+.card .prod{font-size:13px;color:var(--fill);font-weight:600;margin-top:-2px;overflow-wrap:anywhere}
+#tankEdit input{padding:7px 8px;font-size:14px;border-radius:8px;min-width:0}
+#tankEdit td{vertical-align:middle}
+small.prodch{display:block;color:var(--fill);font-size:10px;font-weight:600;white-space:nowrap}
+th small.prodh{display:block;color:var(--fill);font-weight:600}
 .tankbox{height:140px;display:flex;align-items:center;justify-content:center}
 .big{font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}
 .row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -153,8 +158,13 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
   <h4>Sensor signals (4-20 mA inputs)</h4>
   <table><thead><tr><th>Input</th><th>mA</th><th>Status</th></tr></thead><tbody id="signals"></tbody></table>
 
-  <h4>Tanks and PLC channels</h4>
-  <table><thead><tr><th>Tank</th><th>PLC No</th><th>Level mm</th><th>Litres</th></tr></thead><tbody id="tankmap"></tbody></table>
+  <h4>Tank details (tank number and product)</h4>
+  <p>Type the tank number and the product now in each tank, then tap <b>Save tank details</b>. The work PC records the product with every daily reading, so reports show what was in each tank at the time.</p>
+  <div style="overflow-x:auto"><table id="tankEdit"><thead><tr><th>PLC No</th><th>Tank number</th><th>Product</th><th>Litres</th></tr></thead><tbody id="tankmap"></tbody></table></div>
+  <label for="editCode">Admin edit code</label>
+  <input id="editCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. K7M2-Q9XP (from edit_code.txt on the work PC)">
+  <div class="btns"><button class="btn" id="saveTanks">Save tank details</button><button class="btn sec" id="undoTanks">Undo changes</button></div>
+  <div class="msg" id="tankMsg"></div>
 
   <h4>Other PLC tank channels (not yet identified)</h4>
   <table><thead><tr><th>PLC No</th><th>Level mm</th><th>Litres</th></tr></thead><tbody id="others"></tbody></table>
@@ -204,7 +214,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.2.4';
+var APP_VERSION = '1.3.0';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -288,7 +298,7 @@ function render(d, fromCache){
     if (tk.levelMm === 0 && tk.litres === 0) flag = '<div class="flag bad">Reads zero: empty, or a sensor/cabling fault?</div>';
     else if (vf > 1.02) flag = '<div class="flag">Above stated capacity: check tank data</div>';
     if (tk.note) flag += '<div class="flag">' + esc(tk.note) + '</div>';
-    html += '<div class="card"><h2>' + esc(tk.name) + '</h2>' +
+    html += '<div class="card"><h2>' + esc(tk.name) + '</h2>' + (tk.product ? '<div class="prod">' + esc(tk.product) + '</div>' : '') +
       '<div class="tankbox">' + tankSvg(tk, lf, vf) + '</div>' +
       '<div class="big">' + fmt(tk.litres) + ' L</div>' +
       '<div class="row"><span>Full</span><b>' + (tk.capacityL ? Math.round(vf * 100) + ' %' : '-') + '</b></div>' +
@@ -314,9 +324,16 @@ function renderAdmin(){
     s += '<tr><td>A' + (i + 1) + '</td><td>' + (isNaN(mA) ? '-' : mA.toFixed(2)) + '</td><td class="' + cls + '">' + txt + '</td></tr>';
   });
   $('signals').innerHTML = s || '<tr><td colspan="3">No signal data</td></tr>';
-  var m = '';
-  (current.tanks || []).forEach(function(t){ m += '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.plcNo) + '</td><td>' + fmt(t.levelMm) + '</td><td>' + fmt(t.litres) + '</td></tr>'; });
-  $('tankmap').innerHTML = m || '<tr><td colspan="4">None</td></tr>';
+  if (!tEditing){
+    var m = '';
+    (current.tanks || []).forEach(function(t){
+      m += '<tr data-plc="' + esc(t.plcNo) + '"><td>' + esc(t.plcNo) + '</td>' +
+        '<td><input class="tName" maxlength="30" value="' + esc(t.name || '') + '"></td>' +
+        '<td><input class="tProd" maxlength="40" placeholder="(empty)" value="' + esc(t.product || '') + '"></td>' +
+        '<td>' + fmt(t.litres) + '</td></tr>';
+    });
+    $('tankmap').innerHTML = m || '<tr><td colspan="4">No tanks yet</td></tr>';
+  }
   var o = '';
   (current.others || []).forEach(function(r){ o += '<tr><td>' + esc(r.plcNo) + '</td><td>' + fmt(r.levelMm) + '</td><td>' + fmt(r.litres) + '</td></tr>'; });
   $('others').innerHTML = o || '<tr><td colspan="3">None</td></tr>';
@@ -415,7 +432,9 @@ function openAdmin(){
   if (![].some.call(rs.options, function(o){ return o.value === rv; })){ var o = document.createElement('option'); o.value = rv; o.textContent = rv + ' seconds'; rs.insertBefore(o, rs.firstChild); }
   rs.value = rv;
   $('verText').textContent = 'App version ' + APP_VERSION;
-  $('srcMsg').textContent = ''; $('pwMsg').textContent = '';
+  $('srcMsg').textContent = ''; $('pwMsg').textContent = ''; $('tankMsg').textContent = '';
+  $('editCode').value = LS.get('editCode', '');
+  tEditing = false;
   renderAdmin();
   $('adminSheet').classList.add('open');
 }
@@ -470,6 +489,47 @@ $('testSrc').onclick = function(){
     .catch(function(e){ m.className = 'msg bad'; m.textContent = 'Not working: ' + e.message; });
 };
 
+/* ---------- tank details (names and products) ---------- */
+var tEditing = false;
+$('tankmap').addEventListener('input', function(){ tEditing = true; });
+$('undoTanks').onclick = function(){ tEditing = false; $('tankMsg').textContent = ''; renderAdmin(); };
+function dbBase(){ var m = LS.get('src', '').match(/^(https:\/\/[^\/]+)\/plants\/[^\/?]+\.json/); return m ? m[1] : ''; }
+function sha16(text){
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function(buf){
+    return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join('').slice(0, 16);
+  });
+}
+$('saveTanks').onclick = function(){
+  var m = $('tankMsg'), base = dbBase(), code = $('editCode').value.trim().toUpperCase();
+  m.className = 'msg bad';
+  if (!current || !current.tanks || current.demo){ m.textContent = 'Connect the app to the work PC first (Data source below).'; return; }
+  if (!base){ m.textContent = 'Changing tank details needs the online data address (ending in .json) under Data source.'; return; }
+  if (!code){ m.textContent = 'Type the admin edit code. It is in the file edit_code.txt on the work PC.'; return; }
+  var rows = [].slice.call($('tankmap').querySelectorAll('tr[data-plc]')), out = [], names = {};
+  for (var i = 0; i < rows.length; i++){
+    var nm = rows[i].querySelector('.tName').value.trim(), pr = rows[i].querySelector('.tProd').value.trim();
+    if (!nm){ m.textContent = 'Every tank needs a tank number (PLC ' + rows[i].getAttribute('data-plc') + ' is empty).'; return; }
+    if (names[nm.toLowerCase()]){ m.textContent = 'The tank number "' + nm + '" is used twice.'; return; }
+    if (/[",\\]/.test(nm + pr)){ m.textContent = 'Please do not use commas, quote marks or backslashes.'; return; }
+    names[nm.toLowerCase()] = true;
+    out.push({plcNo: Number(rows[i].getAttribute('data-plc')), name: nm, product: pr});
+  }
+  sha16('tank-edit:' + code).then(function(h){
+    if (current.editHash && h !== current.editHash){ m.textContent = 'That edit code is not right. Check edit_code.txt on the work PC.'; return; }
+    if (!current.editHash){ m.textContent = 'The work PC needs the latest Tank Monitor program before tank details can be changed from the app.'; return; }
+    LS.set('editCode', code);
+    m.className = 'msg'; m.textContent = 'Saving...';
+    return fetch(base + '/edits/' + encodeURIComponent(code) + '.json', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({at: new Date().toISOString(), tanks: out})})
+      .then(function(r){
+        if (r.status === 401){ throw new Error('the online database does not allow changes yet (Firebase rules need updating)'); }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        m.className = 'msg good'; m.textContent = 'Saved. The work PC applies the change within about a minute; it then shows here and on every device.';
+        tEditing = false;
+        setTimeout(load, 45000); setTimeout(load, 90000);
+      });
+  }).catch(function(e){ m.className = 'msg bad'; m.textContent = 'Could not save: ' + (e.message || e); });
+};
+
 /* ---------- daily readings ---------- */
 var dRows = [];
 function dailyUrl(){
@@ -493,13 +553,24 @@ function dBuild(){
     if (sl === 'pm' && r.Slot !== 'Afternoon') return false;
     return true;
   });
-  var tanks = [], seen = {}, groups = {}, keys = [];
+  // Group each tank by its PLC number, so a renamed tank stays in one column.
+  var tanks = [], seen = {}, groups = {}, keys = [], label = {}, newest = {}, order = {}, byName = {};
+  (current && current.tanks || []).forEach(function(t, i){ order['p' + t.plcNo] = i; byName[t.name] = t.plcNo; });
+  function keyOf(r){ return r.PlcNo ? 'p' + r.PlcNo : (byName[r.Tank] !== undefined ? 'p' + byName[r.Tank] : 'n' + r.Tank); }
   sel.forEach(function(r){
-    if (!seen[r.Tank]){ seen[r.Tank] = true; tanks.push(r.Tank); }
+    var tk = keyOf(r);
+    if (!seen[tk]){ seen[tk] = true; tanks.push(tk); }
+    var stamp = r.Date + ' ' + r.Time;
+    if (!newest[tk] || stamp >= newest[tk].stamp){ newest[tk] = {stamp: stamp, name: r.Tank, prod: r.Product || ''}; }
     var k = r.Date + '|' + r.Slot + '|' + r.Time;
     if (!groups[k]){ groups[k] = {date: r.Date, slot: r.Slot, time: r.Time, t: {}}; keys.push(k); }
-    groups[k].t[r.Tank] = r;
+    groups[k].t[tk] = r;
   });
+  tanks.sort(function(a, b){
+    var A = order[a] !== undefined ? order[a] : 999, B = order[b] !== undefined ? order[b] : 999;
+    return A - B;
+  });
+  tanks.forEach(function(tk){ label[tk] = newest[tk].name; });
   keys.sort(function(a, b){
     var A = groups[a], B = groups[b];
     if (A.date !== B.date) return A.date < B.date ? 1 : -1;
@@ -512,14 +583,19 @@ function dBuild(){
     if (view === 'mm') return Number(r.LevelMm);
     return Number(r.CapacityL) ? Math.round(Number(r.Litres) / Number(r.CapacityL) * 1000) / 10 : null;
   }
-  return {tanks: tanks, groups: groups, keys: keys, view: view, val: val};
+  var anyProd = sel.some(function(r){ return r.Product; });
+  return {tanks: tanks, groups: groups, keys: keys, view: view, val: val,
+    label: function(tk){ return label[tk]; },
+    prod: function(tk){ return newest[tk] ? newest[tk].prod : ''; },
+    rowProd: function(r){ return r ? (r.Product || '') : ''; },
+    anyProd: anyProd};
 }
 
 function dRender(){
   var b = dBuild(), unit = b.view === 'litres' ? 'L' : (b.view === 'mm' ? 'mm' : '%');
   if (!b.keys.length){ $('dTable').innerHTML = '<p style="padding:14px">No readings in this period. Readings are taken at the work PC each morning and afternoon.</p>'; return; }
   var h = '<table><thead><tr><th class="sticky">Date</th><th>Reading</th>';
-  b.tanks.forEach(function(t){ h += '<th>' + esc(shortName(t)) + '<br><small>' + unit + '</small></th>'; });
+  b.tanks.forEach(function(t){ h += '<th>' + esc(shortName(b.label(t))) + (b.prod(t) ? '<small class="prodh">' + esc(b.prod(t)) + '</small>' : '<br>') + '<small>' + unit + '</small></th>'; });
   if (b.view === 'litres') h += '<th class="tot">Total<br><small>L</small></th>';
   h += '</tr></thead><tbody>';
   var last = '';
@@ -530,7 +606,8 @@ function dRender(){
     b.tanks.forEach(function(t){
       var v = b.val(g.t[t]);
       if (b.view === 'litres' && v !== null) tot += v;
-      h += '<td>' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + '</td>';
+      var rp = b.rowProd(g.t[t]);
+      h += '<td>' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + (v !== null && rp && rp !== b.prod(t) ? '<small class="prodch">' + esc(rp) + '</small>' : '') + '</td>';
     });
     if (b.view === 'litres') h += '<td class="tot">' + fmt(tot) + '</td>';
     h += '</tr>';
@@ -558,12 +635,13 @@ function dLoad(){
 
 function dCsv(){
   var b = dBuild(), u = b.view === 'litres' ? ' (L)' : (b.view === 'mm' ? ' (mm)' : ' (%)');
-  var head = ['Date', 'Reading', 'Time'].concat(b.tanks.map(function(t){ return t + u; }));
+  var head = ['Date', 'Reading', 'Time'];
+  b.tanks.forEach(function(t){ head.push(b.label(t) + u); if (b.anyProd) head.push(b.label(t) + ' product'); });
   if (b.view === 'litres') head.push('Total (L)');
   var lines = [head];
   b.keys.forEach(function(k){
     var g = b.groups[k], tot = 0, line = [g.date, g.slot, g.time];
-    b.tanks.forEach(function(t){ var v = b.val(g.t[t]); if (b.view === 'litres' && v !== null) tot += v; line.push(v === null ? '' : v); });
+    b.tanks.forEach(function(t){ var v = b.val(g.t[t]); if (b.view === 'litres' && v !== null) tot += v; line.push(v === null ? '' : v); if (b.anyProd) line.push(g.t[t] ? b.rowProd(g.t[t]) : ''); });
     if (b.view === 'litres') line.push(tot);
     lines.push(line);
   });
@@ -633,13 +711,13 @@ var HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,55
 function pdfClean(t){ return String(t).replace(/[   ]/g, ' ').replace(/[^\x20-\x7e]/g, '?'); }
 function pdfW(t, size, bold){ t = pdfClean(t); var w = 0; for (var i = 0; i < t.length; i++){ w += HW[t.charCodeAt(i) - 32] || 556; } return w * size / 1000 * (bold ? 1.06 : 1); }
 function pdfEsc(t){ return pdfClean(t).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
-function makePdf(title, info, head, units, rows){
+function makePdf(title, info, head, units, rows, prods){
   var PW = 842, PH = 595, M = 28, avail = PW - 2 * M, n = head.length, size = 8.5, gap = 8, cw = [];
   for (;;){
     cw = [];
     for (var c = 0; c < n; c++){
-      var w = Math.max(pdfW(head[c], size, true), pdfW(units[c] || '', size, false));
-      rows.forEach(function(r){ w = Math.max(w, pdfW(r.cells[c], size, c === n - 1 && r.boldLast)); });
+      var w = Math.max(pdfW(head[c], size, true), pdfW(units[c] || '', size, false), prods ? pdfW(prods[c] || '', size * 0.8, true) : 0);
+      rows.forEach(function(r){ w = Math.max(w, pdfW(r.cells[c], size, c === n - 1 && r.boldLast), r.sub ? pdfW(r.sub[c] || '', size * 0.75, false) : 0); });
       cw.push(w + gap);
     }
     var tot = cw.reduce(function(a, b){ return a + b; }, 0);
@@ -651,10 +729,11 @@ function makePdf(title, info, head, units, rows){
   var lh = size * 1.75, pages = [], cur = null, y = 0;
   function txt(x, yy, t, bold, sz){ return 'BT /' + (bold ? 'F2' : 'F1') + ' ' + sz.toFixed(2) + ' Tf ' + x.toFixed(2) + ' ' + yy.toFixed(2) + ' Td (' + pdfEsc(t) + ') Tj ET\n'; }
   function line(x1, y1, x2, y2, w, g){ return g + ' G ' + w + ' w ' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' m ' + x2.toFixed(2) + ' ' + y2.toFixed(2) + ' l S\n'; }
-  function cell(c, t, yy, bold){
+  function cell(c, t, yy, bold, sz){
+    sz = sz || size;
     var x = M; for (var i = 0; i < c; i++) x += cw[i];
-    if (c < 2) return txt(x + 2, yy, t, bold, size);
-    return txt(x + cw[c] - 3 - pdfW(t, size, bold), yy, t, bold, size);
+    if (c < 2) return txt(x + 2, yy, t, bold, sz);
+    return txt(x + cw[c] - 3 - pdfW(t, sz, bold), yy, t, bold, sz);
   }
   function newPage(){
     cur = '';
@@ -662,18 +741,26 @@ function makePdf(title, info, head, units, rows){
     cur += txt(PW - M - pdfW(info, 8, false), PH - M - 12, info, false, 8);
     cur += line(M, PH - M - 18, PW - M, PH - M - 18, 1.2, '0');
     y = PH - M - 34;
-    for (var c = 0; c < n; c++){ cur += cell(c, head[c], y, true); if (units[c]) cur += cell(c, units[c], y - size - 1, false); }
-    y -= size + 6;
+    var hy = y;
+    for (var c = 0; c < n; c++){ cur += cell(c, head[c], hy, true); }
+    if (prods){ hy -= size + 1; for (c = 0; c < n; c++){ if (prods[c]) cur += cell(c, prods[c], hy, true, size * 0.8); } }
+    hy -= size + 1;
+    for (c = 0; c < n; c++){ if (units[c]) cur += cell(c, units[c], hy, false); }
+    y = hy - 5;
     cur += line(M, y, PW - M, y, 0.8, '0');
     y -= lh;
     pages.push(cur);
   }
   newPage();
   rows.forEach(function(r){
-    if (y < M + 14){ pages[pages.length - 1] = cur; newPage(); }
+    var rh = lh + (r.sub ? size * 0.85 : 0);
+    if (y - (rh - lh) < M + 14){ pages[pages.length - 1] = cur; newPage(); }
     if (r.daystart) cur += line(M, y + lh - size * 0.45, PW - M, y + lh - size * 0.45, 0.6, '0.45');
-    for (var c = 0; c < n; c++) cur += cell(c, r.cells[c], y, c === n - 1 && r.boldLast);
-    y -= lh;
+    for (var c = 0; c < n; c++){
+      cur += cell(c, r.cells[c], y, c === n - 1 && r.boldLast);
+      if (r.sub && r.sub[c]) cur += cell(c, r.sub[c], y - size * 0.95, false, size * 0.75);
+    }
+    y -= rh;
   });
   pages[pages.length - 1] = cur;
   pages = pages.map(function(p, i){ return p + txt(PW - M - 40, M - 12, 'Page ' + (i + 1) + ' of ' + pages.length, false, 7); });
@@ -697,18 +784,24 @@ function makePdf(title, info, head, units, rows){
 }
 function dPdf(){
   var b = dBuild(), unit = b.view === 'litres' ? 'L' : (b.view === 'mm' ? 'mm' : '%');
-  var head = ['Date', 'Reading'].concat(b.tanks.map(shortName)), units = ['', ''].concat(b.tanks.map(function(){ return unit; }));
-  if (b.view === 'litres'){ head.push('Total'); units.push('L'); }
+  var head = ['Date', 'Reading'].concat(b.tanks.map(function(t){ return shortName(b.label(t)); })), units = ['', ''].concat(b.tanks.map(function(){ return unit; }));
+  var prods = b.anyProd ? ['', ''].concat(b.tanks.map(function(t){ return b.prod(t); })) : null;
+  if (b.view === 'litres'){ head.push('Total'); units.push('L'); if (prods) prods.push(''); }
   var rows = [], last = '';
   b.keys.forEach(function(k){
     var g = b.groups[k], tot = 0, first = g.date !== last; last = g.date;
-    var cells = [first ? niceD(g.date) : '', g.slot + ' ' + g.time];
-    b.tanks.forEach(function(t){ var v = b.val(g.t[t]); if (b.view === 'litres' && v !== null) tot += v; cells.push(v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))); });
-    if (b.view === 'litres') cells.push(fmt(tot));
-    rows.push({cells: cells, daystart: first && rows.length > 0, boldLast: b.view === 'litres'});
+    var cells = [first ? niceD(g.date) : '', g.slot + ' ' + g.time], sub = ['', ''], hasSub = false;
+    b.tanks.forEach(function(t){
+      var v = b.val(g.t[t]), rp = b.rowProd(g.t[t]);
+      if (b.view === 'litres' && v !== null) tot += v;
+      cells.push(v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v)));
+      if (v !== null && rp && rp !== b.prod(t)){ sub.push(rp); hasSub = true; } else sub.push('');
+    });
+    if (b.view === 'litres'){ cells.push(fmt(tot)); sub.push(''); }
+    rows.push({cells: cells, sub: hasSub ? sub : null, daystart: first && rows.length > 0, boldLast: b.view === 'litres'});
   });
   var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[b.view];
-  return makePdf('Daily tank readings (' + vn + ')', 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '    Printed: ' + new Date().toLocaleString('en-ZA'), head, units, rows);
+  return makePdf('Daily tank readings (' + vn + ')', 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '    Printed: ' + new Date().toLocaleString('en-ZA'), head, units, rows, prods);
 }
 if (/TankLevelsDesktop/.test(navigator.userAgent)){ document.documentElement.classList.add('desktop'); }
 function isNative(){ var C = window.Capacitor; return !!(C && C.isNativePlatform && C.isNativePlatform()); }
@@ -747,7 +840,8 @@ $('dText').onclick = function(){
     b.tanks.forEach(function(t){
       var v = b.val(g.t[t]);
       if (b.view === 'litres' && v !== null) tot += v;
-      out.push(shortName(t) + ': ' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + unit);
+      var rp = b.rowProd(g.t[t]);
+      out.push(shortName(b.label(t)) + (rp ? ' (' + rp + ')' : '') + ': ' + (v === null ? '-' : (b.view === 'pct' ? v.toFixed(1) : fmt(v))) + unit);
     });
     if (b.view === 'litres') out.push('Total: ' + fmt(tot) + ' L');
   });
