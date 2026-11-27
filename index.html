@@ -81,6 +81,20 @@ input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10
 .hev b{font-size:15px}
 .hev.up b{color:var(--accent)} .hev.down b{color:#c8372d}
 .hsum{font-size:14px;color:var(--muted);margin:8px 0}
+.hprinthead{display:none}
+@media print{
+  html,body.hprinting{background:#fff !important}
+  body.hprinting > *:not(#histSheet){display:none !important}
+  body.hprinting #hCross,body.hprinting #hDot{visibility:hidden !important}
+  body.hprinting #histSheet{position:static;display:block;background:#fff}
+  body.hprinting #histSheet .panel{display:block;height:auto;min-height:0;max-height:none;overflow:visible;padding:0;background:#fff;color:#000}
+  body.hprinting #histSheet h3,body.hprinting #histSheet .dctl,body.hprinting #histSheet .btns,body.hprinting #hMsg,body.hprinting #hTip,body.hprinting .hnote{display:none !important}
+  body.hprinting .hprinthead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:8px;font-size:11px}
+  body.hprinting .hprinthead b{font-size:16px}
+  body.hprinting #hChart{border:1px solid #999;break-inside:avoid}
+  body.hprinting .hev{break-inside:avoid;padding:4px 10px;margin:4px 0}
+}
+
 #dailySheet{align-items:stretch;justify-content:stretch}
 #dailySheet .panel{max-width:none;width:100%;height:100%;max-height:none;border-radius:0;display:flex;flex-direction:column;
   padding:calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom))}
@@ -211,13 +225,14 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
     <label for="hDate">Day<input type="date" id="hDate"></label>
     <label for="hView">Show<select id="hView"><option value="L">Litres</option><option value="mm">Level (mm)</option></select></label>
   </div>
-  <div class="btns"><button class="btn sec" id="hPrev">&larr; Previous day</button><button class="btn sec" id="hNext">Next day &rarr;</button><button class="btn sec" id="hCsv">Export day to Excel (CSV)</button></div>
+  <div class="btns"><button class="btn sec" id="hPrev">&larr; Previous day</button><button class="btn sec" id="hNext">Next day &rarr;</button><button class="btn sec" id="hCsv">Export day to Excel (CSV)</button><button class="btn sec" id="hPrint">Print / PDF</button></div>
+  <div class="hprinthead"><b id="hphTitle"></b><span id="hphInfo"></span></div>
   <div class="msg" id="hMsg"></div>
   <div id="hChart"><div id="hTip"></div><div id="hSvg"></div></div>
   <div class="hsum" id="hSum"></div>
   <h4>Filling and emptying</h4>
   <div id="hEvents"></div>
-  <p>Readings are taken every minute by the work PC. Touch or hover over the graph to see the exact time and value. The last 31 days are available.</p>
+  <p class="hnote">Readings are taken every minute by the work PC. Touch or hover over the graph to see the exact time and value. The last 31 days are available.</p>
 </div></div>
 <div class="sheet" id="dailySheet"><div class="panel wide">
   <h3>Daily readings <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
@@ -240,7 +255,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.4.0';
+var APP_VERSION = '1.4.1';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -598,7 +613,14 @@ function hSeries(){
   if (!tk) return null;
   var key = $('hView').value, pts = [];
   for (var i = 0; i < hData.t.length; i++){ var v = tk[key] ? tk[key][i] : null; if (v !== null && v !== undefined) pts.push([hData.t[i], Number(v), Number(tk.L[i])]); }
-  return {tank: tk, pts: pts, unit: key === 'L' ? 'L' : 'mm'};
+  // Ignore single glitch readings (one minute that jumps far away and straight back).
+  var big = Math.max(1000, (Number(tk.capacityL) || 0) * 0.05), clean = [], dropped = 0;
+  for (i = 0; i < pts.length; i++){
+    var a = pts[i - 1], b = pts[i + 1], c = pts[i];
+    if (a && b && b[0] - a[0] <= 4 && Math.abs(c[2] - a[2]) > big && Math.abs(c[2] - b[2]) > big && Math.abs(a[2] - b[2]) < big / 2){ dropped++; continue; }
+    clean.push(c);
+  }
+  return {tank: tk, pts: clean, unit: key === 'L' ? 'L' : 'mm', dropped: dropped};
 }
 // Find filling / emptying periods from the litres.
 function hEvents(pts, cap){
@@ -661,12 +683,85 @@ function hDraw(){
   }
   hit.addEventListener('mousemove', show); hit.addEventListener('touchstart', show, {passive: true}); hit.addEventListener('touchmove', show, {passive: true});
   var first = pts[0], last = pts[pts.length - 1];
-  $('hSum').textContent = sr.tank.name + ': ' + fmt(first[2]) + ' L at ' + hm(first[0]) + ', ' + fmt(last[2]) + ' L at ' + hm(last[0]) + ' (lowest ' + fmt(minV) + ', highest ' + fmt(maxV) + ' ' + sr.unit + ').';
+  $('hSum').textContent = sr.tank.name + ': ' + fmt(first[2]) + ' L at ' + hm(first[0]) + ', ' + fmt(last[2]) + ' L at ' + hm(last[0]) + ' (lowest ' + fmt(minV) + ', highest ' + fmt(maxV) + ' ' + sr.unit + ').' + (sr.dropped ? ' ' + sr.dropped + ' glitch reading' + (sr.dropped > 1 ? 's' : '') + ' ignored.' : '');
   $('hEvents').innerHTML = evs.length ? evs.map(function(e){
     return '<div class="hev ' + (e.dir > 0 ? 'up' : 'down') + '"><b>' + (e.dir > 0 ? 'Filling' : 'Emptying') + '  ' + hm(e.t0) + ' &rarr; ' + hm(e.t1) + '</b> (' + durTxt(e.t1 - e.t0) + ')<br>' +
       fmt(e.v0) + ' L &rarr; ' + fmt(e.v1) + ' L: <b>' + (e.ch > 0 ? '+' : '&minus;') + fmt(Math.abs(e.ch)) + ' L</b>. Level steady again from ' + hm(e.t1) + '.</div>';
   }).join('') : '<p>No filling or emptying found on this day (the level stayed steady).</p>';
 }
+
+function hPdf(sr, evs){
+  // One A4 landscape page: title, graph and the filling / emptying list.
+  var PW = 842, PH = 595, M = 32, c = '', pts = sr.pts, cap = Number(sr.tank.capacityL) || 0;
+  function T(x, y, t, b, sz, right){ if (right) x -= pdfW(t, sz, b); c += 'BT /' + (b ? 'F2' : 'F1') + ' ' + sz + ' Tf ' + x.toFixed(1) + ' ' + y.toFixed(1) + ' Td (' + pdfEsc(t) + ') Tj ET\n'; }
+  function Ln(x1, y1, x2, y2, w, g, dash){ c += (dash ? '[3 3] 0 d ' : '[] 0 d ') + g + ' RG ' + w + ' w ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' m ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' l S\n'; }
+  var day = $('hDate').value, p = day.split('-');
+  var pr0 = prodOf(sr.tank.plcNo);
+  T(M, PH - M - 14, sr.tank.name + (pr0 ? ' (' + pr0 + ')' : '') + ' - tank history', true, 16);
+  T(PW - M, PH - M - 14, niceD(day) + '    Printed: ' + new Date().toLocaleString('en-ZA'), false, 9, true);
+  Ln(M, PH - M - 20, PW - M, PH - M - 20, 1.2, '0 0 0');
+  var gx0 = M + 46, gx1 = PW - M - 6, gy1 = PH - M - 34, gy0 = 250;
+  var maxV = 0; pts.forEach(function(q){ if (q[1] > maxV) maxV = q[1]; });
+  var top = sr.unit === 'L' ? Math.max(maxV, cap) : maxV; top = top <= 0 ? 1 : top * 1.05;
+  var step = Math.pow(10, Math.floor(Math.log10(top / 5))); [1, 2, 2.5, 5, 10].some(function(f){ if (top / (step * f) <= 6){ step *= f; return true; } });
+  top = Math.ceil(top / step) * step;
+  var X = function(m){ return gx0 + (gx1 - gx0) * m / 1440; }, Y = function(v){ return gy0 + (gy1 - gy0) * v / top; };
+  evs.forEach(function(e){ c += (e.dir > 0 ? '0.88 0.94 0.98' : '0.98 0.9 0.9') + ' rg ' + X(e.t0).toFixed(1) + ' ' + gy0 + ' ' + Math.max(1.5, X(e.t1) - X(e.t0)).toFixed(1) + ' ' + (gy1 - gy0).toFixed(1) + ' re f\n'; });
+  c += '0 g\n';
+  for (var v = 0; v <= top + 1e-9; v += step){ Ln(gx0, Y(v), gx1, Y(v), 0.4, '0.8 0.8 0.8'); T(gx0 - 4, Y(v) - 3, fmt(v), false, 7.5, true); }
+  for (var h = 0; h <= 24; h += 2){ Ln(X(h * 60), gy0, X(h * 60), gy1, 0.4, '0.85 0.85 0.85', true); var lb = ('0' + h).slice(-2) + ':00'; T(X(h * 60) - pdfW(lb, 7.5) / 2, gy0 - 11, lb, false, 7.5); }
+  T(gx0 - 40, gy1 + 6, sr.unit === 'L' ? 'Litres' : 'Level mm', false, 7.5);
+  if (sr.unit === 'L' && cap){ Ln(gx0, Y(cap), gx1, Y(cap), 0.8, '0.85 0.54 0', true); T(gx1, Y(cap) + 3, 'Capacity ' + fmt(cap) + ' L', false, 7, true); }
+  var path = '', prev = null;
+  pts.forEach(function(q){ path += X(q[0]).toFixed(1) + ' ' + Y(q[1]).toFixed(1) + (prev === null || q[0] - prev > 5 ? ' m ' : ' l '); prev = q[0]; });
+  c += '[] 0 d 0.12 0.5 0.72 RG 1.4 w 1 j ' + path + 'S\n';
+  Ln(gx0, gy0, gx1, gy0, 0.8, '0 0 0'); Ln(gx0, gy0, gx0, gy1, 0.8, '0 0 0');
+  var y = gy0 - 32;
+  T(M, y, $('hSum').textContent, false, 9); y -= 18;
+  T(M, y, 'Filling and emptying', true, 11); y -= 15;
+  if (!evs.length){ T(M, y, 'No filling or emptying found on this day (the level stayed steady).', false, 9); }
+  evs.forEach(function(e){
+    if (y < M + 10) return;
+    T(M, y, (e.dir > 0 ? 'Filling ' : 'Emptying ') + hm(e.t0) + ' - ' + hm(e.t1) + '  (' + durTxt(e.t1 - e.t0) + ')', true, 9.5);
+    T(M + 200, y, fmt(e.v0) + ' L  to  ' + fmt(e.v1) + ' L:  ' + (e.ch > 0 ? '+' : '-') + fmt(Math.abs(e.ch)) + ' L.   Level steady again from ' + hm(e.t1) + '.', false, 9.5);
+    y -= 14;
+  });
+  var objs = [];
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[2] = '<< /Type /Pages /Kids [5 0 R] /Count 1 >>';
+  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+  objs[5] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>';
+  objs[6] = '<< /Length ' + c.length + ' >>\nstream\n' + c + 'endstream';
+  var out = '%PDF-1.4\n', off = [], i;
+  for (i = 1; i < objs.length; i++){ off[i] = out.length; out += i + ' 0 obj\n' + objs[i] + '\nendobj\n'; }
+  var xref = out.length;
+  out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+  for (i = 1; i < objs.length; i++) out += ('0000000000' + off[i]).slice(-10) + ' 00000 n \n';
+  return out + 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+}
+function prodOf(plc){ var r = ''; (current && current.tanks || []).forEach(function(t){ if (Number(t.plcNo) === Number(plc)) r = t.product || ''; }); return r; }
+$('hPrint').onclick = function(){
+  var m = $('hMsg'), sr = hSeries();
+  if (!sr || !sr.pts.length){ m.className = 'msg bad'; m.textContent = 'Nothing to print for this day.'; return; }
+  var name = 'Tank_history_' + sr.tank.name.replace(/[^A-Za-z0-9]+/g, '_') + '_' + $('hDate').value + '.pdf';
+  if (isNative()){
+    var C = window.Capacitor, b64 = btoa(hPdf(sr, hEvents(sr.pts, Number(sr.tank.capacityL) || 0)));
+    C.Plugins.Filesystem.writeFile({path: name, data: b64, directory: 'DOCUMENTS'}).then(function(){ return true; }, function(){ return false; }).then(function(saved){
+      return C.Plugins.Filesystem.writeFile({path: name, data: b64, directory: 'CACHE'}).then(function(res){
+        m.className = 'msg good'; m.textContent = (saved ? 'PDF saved in Documents as ' + name + '. ' : '') + 'Choose Drive, Files or a PDF app to print or keep it.';
+        return C.Plugins.Share.share({title: 'Tank history (PDF)', files: [res.uri], dialogTitle: 'Print or save the PDF'});
+      });
+    }).catch(function(e){ if (e && /cancel/i.test(String(e.message || e))) return; m.className = 'msg bad'; m.textContent = 'Could not make the PDF: ' + (e.message || e); });
+    return;
+  }
+  var pr = prodOf(sr.tank.plcNo);
+  $('hphTitle').textContent = sr.tank.name + (pr ? ' (' + pr + ')' : '') + ' - tank history';
+  $('hphInfo').textContent = niceD($('hDate').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
+  document.body.classList.add('hprinting');
+  setTimeout(function(){ window.print(); document.body.classList.remove('hprinting'); }, 50);
+};
+
 window.addEventListener('resize', function(){ if ($('histSheet').classList.contains('open')) hDraw(); });
 $('hCsv').onclick = function(){
   if (!hData){ $('hMsg').className = 'msg bad'; $('hMsg').textContent = 'Nothing to export.'; return; }
