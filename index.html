@@ -43,6 +43,10 @@ main{padding:12px 16px calc(24px + env(safe-area-inset-bottom));max-width:1400px
 .card .prod{font-size:13px;color:var(--fill);font-weight:600;margin-top:-2px;overflow-wrap:anywhere}
 #tankEdit input{padding:7px 8px;font-size:14px;border-radius:8px;min-width:0}
 #tankEdit td{vertical-align:middle}
+#tankEdit select{padding:6px 4px;font-size:14px;border-radius:8px;min-width:62px}
+#tankEdit td.tMa{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+#tankEdit td.bad{color:#c8372d;font-weight:600} #tankEdit td.warn{color:#d98a00;font-weight:600}
+small.guess{display:block;font-size:10px;color:var(--muted)}
 td.suspect{color:#a86400;background:rgba(217,138,0,.08)}
 small.notech{display:block;color:#a86400;font-size:10px;font-weight:600;white-space:nowrap}
 small.prodch{display:block;color:var(--fill);font-size:10px;font-weight:600;white-space:nowrap}
@@ -199,11 +203,11 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
   <div class="btns" style="margin-top:0"><button class="btn" id="openHist">Tank history (minute by minute)</button></div>
 
   <h4>Sensor signals (4-20 mA inputs)</h4>
-  <table><thead><tr><th>Input</th><th>mA</th><th>Status</th></tr></thead><tbody id="signals"></tbody></table>
+  <table><thead><tr><th>Input</th><th>Tank</th><th>mA</th><th>Status</th></tr></thead><tbody id="signals"></tbody></table>
 
   <h4>Tank details (tank number and product)</h4>
   <p>Type the tank number and the product now in each tank, then tap <b>Save tank details</b>. The work PC records the product with every daily reading, so reports show what was in each tank at the time.</p>
-  <div style="overflow-x:auto"><table id="tankEdit"><thead><tr><th>PLC No</th><th>Tank number</th><th>Product</th><th>Litres</th></tr></thead><tbody id="tankmap"></tbody></table></div>
+  <div style="overflow-x:auto"><table id="tankEdit"><thead><tr><th>PLC No</th><th>Tank number</th><th>Product</th><th>Sensor input</th><th>mA</th><th>Litres</th></tr></thead><tbody id="tankmap"></tbody></table></div>
   <label for="editCode">Admin edit code</label>
   <input id="editCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. K7M2-Q9XP (from edit_code.txt on the work PC)">
   <div class="btns"><button class="btn" id="saveTanks">Save tank details</button><button class="btn sec" id="undoTanks">Undo changes</button></div>
@@ -277,7 +281,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.5.0';
+var APP_VERSION = '1.5.1';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -377,28 +381,49 @@ function render(d, fromCache){
   if ($('dailySheet').classList.contains('open') && dRows.length) dRender();
 }
 
+// Which 4-20 mA input belongs to each PLC tank, worked out from live readings on 17 and 27 Nov 2026.
+// Used only until the admin saves an input for the tank. '' = not certain yet.
+var INPUT_GUESS = {1: 'A9', 2: 'A5', 3: 'A3', 4: 'A17', 5: 'A6', 6: 'A4', 7: 'A2', 8: 'A20', 9: '', 11: 'A11', 12: 'A12', 13: 'A13', 14: '', 15: 'A15', 16: '', 20: 'A8'};
+function sigInfo(sig){
+  var n = /^A(\d+)$/.test(sig || '') ? Number(sig.slice(1)) : 0, v = n && current && current.signals ? current.signals[n - 1] : null;
+  if (v === null || v === undefined) return {txt: '-', cls: ''};
+  var mA = v / 100, cls = mA <= 0 ? 'bad' : (mA < 3.8 ? 'bad' : (mA >= 20 ? 'warn' : ''));
+  return {txt: mA.toFixed(2), cls: cls, mA: mA};
+}
+function tankInput(t){ return t.input || INPUT_GUESS[t.plcNo] || ''; }
 function renderAdmin(){
   if (!current) return;
-  var s = '';
+  var s = '', byInput = {};
+  (current.tanks || []).forEach(function(t){ var k = tankInput(t); if (k) byInput[k] = (byInput[k] ? byInput[k] + ', ' : '') + t.name + (t.input ? '' : ' ?'); });
   (current.signals || []).forEach(function(v, i){
     var mA = v / 100, cls = '', txt = 'OK';
     if (v === null || v === undefined){ txt = '-'; mA = NaN; }
     else if (v <= 0){ cls = 'bad'; txt = 'No signal'; }
     else if (mA < 3.8){ cls = 'bad'; txt = 'Below 4 mA'; }
     else if (mA >= 20){ cls = 'warn'; txt = 'At/above 20 mA'; }
-    s += '<tr><td>A' + (i + 1) + '</td><td>' + (isNaN(mA) ? '-' : mA.toFixed(2)) + '</td><td class="' + cls + '">' + txt + '</td></tr>';
+    s += '<tr><td>A' + (i + 1) + '</td><td>' + esc(byInput['A' + (i + 1)] || '-') + '</td><td>' + (isNaN(mA) ? '-' : mA.toFixed(2)) + '</td><td class="' + cls + '">' + txt + '</td></tr>';
   });
-  $('signals').innerHTML = s || '<tr><td colspan="3">No signal data</td></tr>';
+  $('signals').innerHTML = s || '<tr><td colspan="4">No signal data</td></tr>';
+  var opts = function(sel){ var o = '<option value="">-</option>'; for (var k = 1; k <= 20; k++) o += '<option' + ('A' + k === sel ? ' selected' : '') + '>A' + k + '</option>'; return o; };
   if (!tEditing){
     var m = '';
     (current.tanks || []).forEach(function(t){
+      var inp = tankInput(t);
       m += '<tr data-plc="' + esc(t.plcNo) + '"><td>' + esc(t.plcNo) + '</td>' +
         '<td><input class="tName" maxlength="30" value="' + esc(t.name || '') + '"></td>' +
         '<td><input class="tProd" maxlength="40" placeholder="(empty)" value="' + esc(t.product || '') + '"></td>' +
-        '<td>' + fmt(t.litres) + '</td></tr>';
+        '<td><select class="tInput" title="' + (t.input ? 'Saved' : 'Suggested from the readings - check and save') + '">' + opts(inp) + '</select>' + (inp && !t.input ? '<small class="guess">suggested</small>' : '') + '</td>' +
+        '<td class="tMa"></td>' +
+        '<td class="tLit">' + fmt(t.litres) + '</td></tr>';
     });
-    $('tankmap').innerHTML = m || '<tr><td colspan="4">No tanks yet</td></tr>';
+    $('tankmap').innerHTML = m || '<tr><td colspan="6">No tanks yet</td></tr>';
   }
+  // mA and litres stay live even while you are typing.
+  [].forEach.call($('tankmap').querySelectorAll('tr[data-plc]'), function(row){
+    var si = sigInfo(row.querySelector('.tInput').value), cell = row.querySelector('.tMa'), plc = Number(row.getAttribute('data-plc'));
+    cell.textContent = si.txt; cell.className = 'tMa ' + si.cls;
+    (current.tanks || []).forEach(function(t){ if (Number(t.plcNo) === plc) row.querySelector('.tLit').textContent = fmt(t.litres); });
+  });
   var o = '';
   (current.others || []).forEach(function(r){ o += '<tr><td>' + esc(r.plcNo) + '</td><td>' + fmt(r.levelMm) + '</td><td>' + fmt(r.litres) + '</td></tr>'; });
   $('others').innerHTML = o || '<tr><td colspan="3">None</td></tr>';
@@ -557,6 +582,7 @@ $('testSrc').onclick = function(){
 /* ---------- tank details (names and products) ---------- */
 var tEditing = false;
 $('tankmap').addEventListener('input', function(){ tEditing = true; });
+$('tankmap').addEventListener('change', function(e){ if (e.target.classList.contains('tInput')){ tEditing = true; renderAdmin(); } });
 $('undoTanks').onclick = function(){ tEditing = false; $('tankMsg').textContent = ''; renderAdmin(); };
 function dbBase(){ var m = LS.get('src', '').match(/^(https:\/\/[^\/]+)\/plants\/[^\/?]+\.json/); return m ? m[1] : ''; }
 function sha16(text){
@@ -576,8 +602,10 @@ $('saveTanks').onclick = function(){
     if (!nm){ m.textContent = 'Every tank needs a tank number (PLC ' + rows[i].getAttribute('data-plc') + ' is empty).'; return; }
     if (names[nm.toLowerCase()]){ m.textContent = 'The tank number "' + nm + '" is used twice.'; return; }
     if (/[",\\]/.test(nm + pr)){ m.textContent = 'Please do not use commas, quote marks or backslashes.'; return; }
+    var inpv = rows[i].querySelector('.tInput').value;
+    if (inpv){ if (names['#' + inpv]){ m.textContent = 'Sensor input ' + inpv + ' is chosen for two tanks.'; return; } names['#' + inpv] = true; }
     names[nm.toLowerCase()] = true;
-    out.push({plcNo: Number(rows[i].getAttribute('data-plc')), name: nm, product: pr});
+    out.push({plcNo: Number(rows[i].getAttribute('data-plc')), name: nm, product: pr, input: rows[i].querySelector('.tInput').value});
   }
   sha16('tank-edit:' + code).then(function(h){
     if (current.editHash && h !== current.editHash){ m.textContent = 'That edit code is not right. Check edit_code.txt on the work PC.'; return; }
