@@ -81,6 +81,22 @@ input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10
 .hev b{font-size:15px}
 .hev.up b{color:var(--accent)} .hev.down b{color:#c8372d}
 .hsum{font-size:14px;color:var(--muted);margin:8px 0}
+#pvSheet{z-index:40;background:#5f6b76;flex-direction:column;align-items:stretch;justify-content:flex-start}
+#pvSheet .pvbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+#pvSheet .pvbar b{font-size:17px;margin-right:auto}
+#pvSheet .pvbar span{font-size:13px;color:var(--muted)}
+#pvScroll{flex:1;overflow:auto;padding:18px 16px}
+#pvBox{margin:0 auto;position:relative}
+#pvPaper{position:absolute;top:0;left:0;width:1123px;min-height:794px;background:#fff;color:#18212b;padding:30px 38px;box-shadow:0 4px 18px rgba(0,0,0,.35);transform-origin:0 0;
+  --line:#d9e0e6;--muted:#5d6b78;--ink:#18212b;--card:#fff;--accent:#1f7fb8;--fill:#1f7fb8;--bg:#fff;font-size:13px}
+#pvPaper .pvhead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:10px;font-size:11px}
+#pvPaper .pvhead b{font-size:18px}
+#pvPaper svg{display:block;width:100%;height:auto;border:1px solid #ccc;border-radius:8px}
+#pvPaper table{width:100%;border-collapse:collapse;font-size:10px}
+#pvPaper th,#pvPaper td{padding:3px 5px;border-bottom:1px solid #ccc;text-align:right;white-space:nowrap}
+#pvPaper th:nth-child(-n+2),#pvPaper td:nth-child(-n+2){text-align:left}
+#pvPaper .pvbreak{position:absolute;left:0;right:0;border-top:2px dashed #c8372d;font-size:11px;color:#c8372d;text-align:right;padding-right:8px}
+@media print{ #pvSheet{display:none !important} }
 .hprinthead{display:none}
 @media print{
   html,body.hprinting{background:#fff !important}
@@ -218,6 +234,10 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <!-- Daily readings -->
+<div class="sheet" id="pvSheet">
+  <div class="pvbar"><b>Print preview</b><span id="pvInfo"></span><button class="btn" id="pvPrint">Print</button><button class="btn sec" id="pvClose">Close</button></div>
+  <div id="pvScroll"><div id="pvBox"><div id="pvPaper"></div></div></div>
+</div>
 <div class="sheet" id="histSheet"><div class="panel">
   <h3>Tank history <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
   <div class="dctl">
@@ -255,7 +275,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.4.1';
+var APP_VERSION = '1.4.2';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -573,6 +593,29 @@ $('saveTanks').onclick = function(){
 };
 
 
+
+/* ---------- print preview (PC) ---------- */
+var pvDoPrint = null;
+function pvFit(){
+  var paper = $('pvPaper'), box = $('pvBox'), avail = $('pvScroll').clientWidth - 32, sc = Math.min(1, avail / 1123);
+  paper.style.transform = 'scale(' + sc + ')';
+  box.style.width = (1123 * sc) + 'px'; box.style.height = (paper.offsetHeight * sc) + 'px';
+}
+function openPreview(headTitle, headInfo, bodyHtml, doPrint){
+  var paper = $('pvPaper');
+  paper.innerHTML = '<div class="pvhead"><b>' + esc(headTitle) + '</b><span>' + esc(headInfo) + '</span></div>' + bodyHtml;
+  pvDoPrint = doPrint;
+  $('pvSheet').classList.add('open');
+  // Show where the pages will break (A4 landscape).
+  var h = paper.offsetHeight, pages = Math.max(1, Math.ceil((h - 4) / 794));
+  for (var k = 1; k < pages; k++){ var d = document.createElement('div'); d.className = 'pvbreak'; d.style.top = (k * 794) + 'px'; d.textContent = 'Page ' + (k + 1); paper.appendChild(d); }
+  $('pvInfo').textContent = 'A4 landscape, ' + pages + ' page' + (pages > 1 ? 's' : '') + '.';
+  pvFit();
+}
+$('pvClose').onclick = function(){ $('pvSheet').classList.remove('open'); };
+$('pvPrint').onclick = function(){ $('pvSheet').classList.remove('open'); if (pvDoPrint) pvDoPrint(); };
+window.addEventListener('resize', function(){ if ($('pvSheet').classList.contains('open')) pvFit(); });
+
 /* ---------- tank history (admin) ---------- */
 var hData = null, hCache = {};
 function histUrl(day){ var u = LS.get('src', ''); var m = u.match(/^(https:\/\/[^\/]+\/plants\/[^\/?]+)\.json/); return m ? m[1] + '_hist/' + day + '.json' : ''; }
@@ -755,11 +798,13 @@ $('hPrint').onclick = function(){
     }).catch(function(e){ if (e && /cancel/i.test(String(e.message || e))) return; m.className = 'msg bad'; m.textContent = 'Could not make the PDF: ' + (e.message || e); });
     return;
   }
-  var pr = prodOf(sr.tank.plcNo);
-  $('hphTitle').textContent = sr.tank.name + (pr ? ' (' + pr + ')' : '') + ' - tank history';
-  $('hphInfo').textContent = niceD($('hDate').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
-  document.body.classList.add('hprinting');
-  setTimeout(function(){ window.print(); document.body.classList.remove('hprinting'); }, 50);
+  var pr = prodOf(sr.tank.plcNo), title = sr.tank.name + (pr ? ' (' + pr + ')' : '') + ' - tank history', info = niceD($('hDate').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
+  $('hphTitle').textContent = title; $('hphInfo').textContent = info;
+  var svg = $('hSvg').innerHTML.replace(/<line id="hCross"[^>]*>/, '').replace(/<circle id="hDot"[^>]*>(<\/circle>)?/, '');
+  openPreview(title, info, svg + '<p style="font-size:12px;color:#5d6b78;margin:8px 0">' + esc($('hSum').textContent) + '</p><h4 style="margin:12px 0 6px">Filling and emptying</h4>' + $('hEvents').innerHTML, function(){
+    document.body.classList.add('hprinting');
+    setTimeout(function(){ window.print(); document.body.classList.remove('hprinting'); }, 50);
+  });
 };
 
 window.addEventListener('resize', function(){ if ($('histSheet').classList.contains('open')) hDraw(); });
@@ -1079,10 +1124,12 @@ $('dPrint').onclick = function(){
     return;
   }
   var vn = {litres: 'litres', mm: 'level in mm', pct: '% full'}[$('dView').value];
-  $('phTitle').textContent = 'Daily tank readings (' + vn + ')';
-  $('phInfo').textContent = 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
-  document.body.classList.add('printing');
-  setTimeout(function(){ window.print(); document.body.classList.remove('printing'); }, 50);
+  var title = 'Daily tank readings (' + vn + ')', info = 'Period: ' + niceD($('dFrom').value) + ' to ' + niceD($('dTo').value) + '   Printed: ' + new Date().toLocaleString('en-ZA');
+  $('phTitle').textContent = title; $('phInfo').textContent = info;
+  openPreview(title, info, $('dTable').innerHTML, function(){
+    document.body.classList.add('printing');
+    setTimeout(function(){ window.print(); document.body.classList.remove('printing'); }, 50);
+  });
 };
 
 $('dText').onclick = function(){
