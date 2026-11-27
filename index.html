@@ -71,6 +71,16 @@ input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10
 .btn.sec{background:var(--line);color:var(--ink)}
 .msg{font-size:13px;margin-top:8px;min-height:18px}
 .panel.wide{max-width:1100px}
+#histSheet{align-items:stretch;justify-content:stretch}
+#histSheet .panel{max-width:none;width:100%;height:100%;max-height:none;border-radius:0;
+  padding:calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom))}
+#hChart{position:relative;margin-top:10px;border:1px solid var(--line);border-radius:12px;background:var(--card);touch-action:pan-y}
+#hChart svg{display:block;width:100%;height:auto}
+#hTip{position:absolute;top:6px;right:10px;font-size:13px;font-weight:600;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 8px;pointer-events:none;display:none}
+.hev{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:6px 0;font-size:14px}
+.hev b{font-size:15px}
+.hev.up b{color:var(--accent)} .hev.down b{color:#c8372d}
+.hsum{font-size:14px;color:var(--muted);margin:8px 0}
 #dailySheet{align-items:stretch;justify-content:stretch}
 #dailySheet .panel{max-width:none;width:100%;height:100%;max-height:none;border-radius:0;display:flex;flex-direction:column;
   padding:calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom))}
@@ -154,6 +164,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 <!-- Admin panel -->
 <div class="sheet" id="adminSheet"><div class="panel">
   <h3>Admin <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+  <div class="btns" style="margin-top:0"><button class="btn" id="openHist">Tank history (minute by minute)</button></div>
 
   <h4>Sensor signals (4-20 mA inputs)</h4>
   <table><thead><tr><th>Input</th><th>mA</th><th>Status</th></tr></thead><tbody id="signals"></tbody></table>
@@ -193,6 +204,21 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <!-- Daily readings -->
+<div class="sheet" id="histSheet"><div class="panel">
+  <h3>Tank history <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
+  <div class="dctl">
+    <label for="hTank">Tank<select id="hTank"></select></label>
+    <label for="hDate">Day<input type="date" id="hDate"></label>
+    <label for="hView">Show<select id="hView"><option value="L">Litres</option><option value="mm">Level (mm)</option></select></label>
+  </div>
+  <div class="btns"><button class="btn sec" id="hPrev">&larr; Previous day</button><button class="btn sec" id="hNext">Next day &rarr;</button><button class="btn sec" id="hCsv">Export day to Excel (CSV)</button></div>
+  <div class="msg" id="hMsg"></div>
+  <div id="hChart"><div id="hTip"></div><div id="hSvg"></div></div>
+  <div class="hsum" id="hSum"></div>
+  <h4>Filling and emptying</h4>
+  <div id="hEvents"></div>
+  <p>Readings are taken every minute by the work PC. Touch or hover over the graph to see the exact time and value. The last 31 days are available.</p>
+</div></div>
 <div class="sheet" id="dailySheet"><div class="panel wide">
   <h3>Daily readings <button class="iconbtn" data-close aria-label="Close">&times;</button></h3>
   <div class="dctl">
@@ -214,7 +240,7 @@ html.desktop #mInstall,html.desktop #mShare{display:none !important}
 </div></div>
 
 <script>
-var APP_VERSION = '1.3.1';
+var APP_VERSION = '1.4.0';
 var LS = {
   get: function(k, d){ try { var v = localStorage.getItem('tank.' + k); return v === null ? d : v; } catch(e){ return d; } },
   set: function(k, v){ try { localStorage.setItem('tank.' + k, v); } catch(e){} },
@@ -529,6 +555,137 @@ $('saveTanks').onclick = function(){
         setTimeout(load, 45000); setTimeout(load, 90000);
       });
   }).catch(function(e){ m.className = 'msg bad'; m.textContent = 'Could not save: ' + (e.message || e); });
+};
+
+
+/* ---------- tank history (admin) ---------- */
+var hData = null, hCache = {};
+function histUrl(day){ var u = LS.get('src', ''); var m = u.match(/^(https:\/\/[^\/]+\/plants\/[^\/?]+)\.json/); return m ? m[1] + '_hist/' + day + '.json' : ''; }
+function isoDay(d){ return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function hm(min){ return ('0' + Math.floor(min / 60)).slice(-2) + ':' + ('0' + Math.round(min % 60)).slice(-2); }
+function durTxt(m){ m = Math.round(m); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + ('0' + (m % 60)).slice(-2) + ' min'; }
+$('openHist').onclick = function(){
+  var sel = $('hTank'), keep = sel.value;
+  sel.innerHTML = (current && current.tanks || []).map(function(t){ return '<option value="' + esc(t.plcNo) + '">' + esc(t.name) + (t.product ? ' (' + esc(t.product) + ')' : '') + '</option>'; }).join('');
+  if (keep) sel.value = keep;
+  if (!$('hDate').value){ var y = new Date(); y.setDate(y.getDate() - 1); $('hDate').value = isoDay(y); }
+  $('histSheet').classList.add('open');
+  hLoad();
+};
+['hTank', 'hView'].forEach(function(id){ $(id).addEventListener('change', hDraw); });
+$('hDate').addEventListener('change', hLoad);
+function hShift(n){ var p = $('hDate').value.split('-'), d = new Date(+p[0], p[1] - 1, +p[2] + n); if (d > new Date()) return; $('hDate').value = isoDay(d); hLoad(); }
+$('hPrev').onclick = function(){ hShift(-1); };
+$('hNext').onclick = function(){ hShift(1); };
+function hLoad(){
+  var day = $('hDate').value, u = histUrl(day), m = $('hMsg');
+  hData = null;
+  if (!u){ m.className = 'msg bad'; m.textContent = 'Tank history needs the online data address (Admin > Data source).'; hDraw(); return; }
+  var isToday = day === isoDay(new Date());
+  if (hCache[day] && !isToday){ hData = hCache[day]; m.textContent = ''; hDraw(); return; }
+  m.className = 'msg'; m.textContent = 'Loading...';
+  fetch(u + '?t=' + Date.now(), {cache: 'no-store'}).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function(d){
+    if (!d || !d.t){ m.className = 'msg bad'; m.textContent = 'No history for this day. The work PC sends each day while it is running (the last 31 days are kept).'; hDraw(); return; }
+    hData = d; if (!isToday) hCache[day] = d;
+    m.className = 'msg'; m.textContent = isToday ? 'Today so far (updated every 10 minutes).' : '';
+    hDraw();
+  }).catch(function(e){ m.className = 'msg bad'; m.textContent = 'Could not load the history: ' + (e.message || e); hDraw(); });
+}
+function hSeries(){
+  if (!hData) return null;
+  var plc = Number($('hTank').value), tk = null;
+  (hData.tanks || []).forEach(function(t){ if (Number(t.plcNo) === plc) tk = t; });
+  if (!tk) return null;
+  var key = $('hView').value, pts = [];
+  for (var i = 0; i < hData.t.length; i++){ var v = tk[key] ? tk[key][i] : null; if (v !== null && v !== undefined) pts.push([hData.t[i], Number(v), Number(tk.L[i])]); }
+  return {tank: tk, pts: pts, unit: key === 'L' ? 'L' : 'mm'};
+}
+// Find filling / emptying periods from the litres.
+function hEvents(pts, cap){
+  var ev = [], thr = Math.max(200, (cap || 0) * 0.004), j = 0, mv = [];
+  for (var i = 0; i < pts.length; i++){
+    while (j < pts.length - 1 && pts[j][0] < pts[i][0] + 10) j++;
+    if (pts[j][0] - pts[i][0] < 8){ mv.push(0); continue; }
+    var d = pts[j][2] - pts[i][2];
+    mv.push(d >= thr ? 1 : (d <= -thr ? -1 : 0));
+  }
+  var cur = null;
+  for (i = 0; i < pts.length; i++){
+    if (mv[i] === 0) continue;
+    var endIdx = i; while (endIdx < pts.length - 1 && pts[endIdx][0] < pts[i][0] + 10) endIdx++;
+    if (cur && cur.dir === mv[i] && pts[i][0] - pts[cur.e][0] <= 15){ cur.e = Math.max(cur.e, endIdx); }
+    else { if (cur) ev.push(cur); cur = {dir: mv[i], s: i, e: endIdx}; }
+  }
+  if (cur) ev.push(cur);
+  var minChange = Math.max(500, (cap || 0) * 0.01);
+  return ev.map(function(e){
+    // tighten: start where the level begins to move, end where it stops
+    var s = e.s, en = e.e, band = thr / 3, a = pts[s][2], z = pts[en][2];
+    while (s < en && Math.abs(pts[s + 1][2] - a) < band) s++;
+    while (en > s && Math.abs(pts[en - 1][2] - z) < band) en--;
+    var v0 = pts[s][2], v1 = pts[en][2];
+    return {dir: e.dir, t0: pts[s][0], t1: pts[en][0], v0: v0, v1: v1, ch: v1 - v0};
+  }).filter(function(e){ return Math.abs(e.ch) >= minChange; });
+}
+function hDraw(){
+  var box = $('hSvg'), sr = hSeries(), tip = $('hTip');
+  tip.style.display = 'none';
+  if (!sr || !sr.pts.length){ box.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">No data to show</div>'; $('hSum').textContent = ''; $('hEvents').innerHTML = ''; return; }
+  var W = Math.max(320, $('hChart').clientWidth), H = Math.min(420, Math.max(240, Math.round(W * 0.42))), L = 64, R = 14, T = 14, B = 30;
+  var pts = sr.pts, cap = Number(sr.tank.capacityL) || 0;
+  var maxV = 0, minV = Infinity; pts.forEach(function(p){ if (p[1] > maxV) maxV = p[1]; if (p[1] < minV) minV = p[1]; });
+  var top = sr.unit === 'L' ? Math.max(maxV, cap) : maxV; top = top <= 0 ? 1 : top * 1.05;
+  var step = Math.pow(10, Math.floor(Math.log10(top / 5))); [1, 2, 2.5, 5, 10].some(function(f){ if (top / (step * f) <= 6){ step *= f; return true; } });
+  top = Math.ceil(top / step) * step;
+  var x = function(m){ return L + (W - L - R) * m / 1440; }, y = function(v){ return T + (H - T - B) * (1 - v / top); };
+  var g = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="inherit" font-size="11">';
+  var evs = hEvents(pts, cap);
+  evs.forEach(function(e){ g += '<rect x="' + x(e.t0) + '" y="' + T + '" width="' + Math.max(2, x(e.t1) - x(e.t0)) + '" height="' + (H - T - B) + '" fill="' + (e.dir > 0 ? 'rgba(31,127,184,.12)' : 'rgba(200,55,45,.10)') + '"/>'; });
+  for (var v = 0; v <= top + 1e-9; v += step){ g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--line)"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" fill="var(--muted)">' + fmt(v) + '</text>'; }
+  for (var h = 0, hs = W < 700 ? 4 : 2; h <= 24; h += hs){ g += '<line x1="' + x(h * 60) + '" x2="' + x(h * 60) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--line)" stroke-dasharray="2 3"/><text x="' + x(h * 60) + '" y="' + (H - 10) + '" text-anchor="middle" fill="var(--muted)">' + ('0' + h).slice(-2) + ':00</text>'; }
+  if (sr.unit === 'L' && cap) g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(cap) + '" y2="' + y(cap) + '" stroke="#d98a00" stroke-dasharray="6 4"/><text x="' + (W - R - 4) + '" y="' + (y(cap) - 4) + '" text-anchor="end" fill="#d98a00">Capacity ' + fmt(cap) + ' L</text>';
+  var d = '', prev = null;
+  pts.forEach(function(p){ d += (prev === null || p[0] - prev > 5 ? 'M' : 'L') + x(p[0]).toFixed(1) + ' ' + y(p[1]).toFixed(1) + ' '; prev = p[0]; });
+  g += '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>';
+  g += '<line id="hCross" x1="0" x2="0" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--ink)" stroke-width="1" visibility="hidden"/><circle id="hDot" r="4" fill="var(--accent)" visibility="hidden"/>';
+  g += '<rect id="hHit" x="' + L + '" y="' + T + '" width="' + (W - L - R) + '" height="' + (H - T - B) + '" fill="transparent"/></svg>';
+  box.innerHTML = g;
+  var hit = box.querySelector('#hHit'), cross = box.querySelector('#hCross'), dot = box.querySelector('#hDot');
+  function show(ev){
+    var r = box.querySelector('svg').getBoundingClientRect(), cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left, sx = cx * W / r.width;
+    var m = (sx - L) / (W - L - R) * 1440, best = pts[0];
+    pts.forEach(function(p){ if (Math.abs(p[0] - m) < Math.abs(best[0] - m)) best = p; });
+    cross.setAttribute('x1', x(best[0])); cross.setAttribute('x2', x(best[0])); cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', x(best[0])); dot.setAttribute('cy', y(best[1])); dot.setAttribute('visibility', 'visible');
+    tip.style.display = 'block'; tip.textContent = hm(best[0]) + '   ' + fmt(best[1]) + ' ' + sr.unit;
+  }
+  hit.addEventListener('mousemove', show); hit.addEventListener('touchstart', show, {passive: true}); hit.addEventListener('touchmove', show, {passive: true});
+  var first = pts[0], last = pts[pts.length - 1];
+  $('hSum').textContent = sr.tank.name + ': ' + fmt(first[2]) + ' L at ' + hm(first[0]) + ', ' + fmt(last[2]) + ' L at ' + hm(last[0]) + ' (lowest ' + fmt(minV) + ', highest ' + fmt(maxV) + ' ' + sr.unit + ').';
+  $('hEvents').innerHTML = evs.length ? evs.map(function(e){
+    return '<div class="hev ' + (e.dir > 0 ? 'up' : 'down') + '"><b>' + (e.dir > 0 ? 'Filling' : 'Emptying') + '  ' + hm(e.t0) + ' &rarr; ' + hm(e.t1) + '</b> (' + durTxt(e.t1 - e.t0) + ')<br>' +
+      fmt(e.v0) + ' L &rarr; ' + fmt(e.v1) + ' L: <b>' + (e.ch > 0 ? '+' : '&minus;') + fmt(Math.abs(e.ch)) + ' L</b>. Level steady again from ' + hm(e.t1) + '.</div>';
+  }).join('') : '<p>No filling or emptying found on this day (the level stayed steady).</p>';
+}
+window.addEventListener('resize', function(){ if ($('histSheet').classList.contains('open')) hDraw(); });
+$('hCsv').onclick = function(){
+  if (!hData){ $('hMsg').className = 'msg bad'; $('hMsg').textContent = 'Nothing to export.'; return; }
+  var head = ['Time'], lines = [];
+  hData.tanks.forEach(function(t){ head.push(t.name + ' (L)', t.name + ' (mm)'); });
+  lines.push(head.join(','));
+  for (var i = 0; i < hData.t.length; i++){
+    var row = [hm(hData.t[i])];
+    hData.tanks.forEach(function(t){ row.push(t.L[i] === null ? '' : t.L[i], t.mm[i] === null ? '' : t.mm[i]); });
+    lines.push(row.join(','));
+  }
+  var csv = '﻿' + lines.join('\r\n'), name = 'Tank_history_' + hData.date + '.csv';
+  if (isNative() && window.Capacitor.Plugins.Filesystem){
+    window.Capacitor.Plugins.Filesystem.writeFile({path: name, data: csv, directory: 'DOCUMENTS', encoding: 'utf8'})
+      .then(function(){ $('hMsg').className = 'msg good'; $('hMsg').textContent = 'Saved in Documents as ' + name + '.'; })
+      .catch(function(){ $('hMsg').className = 'msg bad'; $('hMsg').textContent = 'This phone does not allow saving there.'; });
+    return;
+  }
+  dDownload(csv, name); $('hMsg').className = 'msg good'; $('hMsg').textContent = 'Saved to Downloads as ' + name + '.';
 };
 
 /* ---------- daily readings ---------- */
